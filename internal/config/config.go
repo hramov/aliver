@@ -11,12 +11,15 @@ const AppVersion = "0.0.1"
 type App struct {
 	Version string
 
-	ClusterID  string `yaml:"cluster_id"`
-	InstanceID int    `yaml:"instance_id"`
-	Ip         string `yaml:"ip"`
-	Port       int    `yaml:"port"`
-	Mode       string `yaml:"mode"`
-	Weight     int    `yaml:"weight"`
+	ClusterID   string        `yaml:"cluster_id"`
+	InstanceID  int           `yaml:"instance_id"`
+	Ip          string        `yaml:"ip"`
+	BroadcastIp string        `yaml:"broadcast_ip"`
+	PortTCP     int           `yaml:"port_tcp"`
+	PortUDP     int           `yaml:"port_udp"`
+	Mode        string        `yaml:"mode"`
+	Weight      int           `yaml:"weight"`
+	Timeout     time.Duration `yaml:"timeout"`
 
 	CheckScript   string        `yaml:"check_script"`
 	CheckInterval time.Duration `yaml:"check_interval"`

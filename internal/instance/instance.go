@@ -10,25 +10,28 @@ import (
 )
 
 type HttpClient interface {
-	SendIAM(ctx context.Context, instanceID int, ip net.IP) error
-	SendAck(ctx context.Context, instanceID int, mode string) error
-	SendCFG(ctx context.Context, instanceID int, mode string, weight int) error
-	SendELC(ctx context.Context, instanceID int, weight int) error
+	SendIAM(ctx context.Context, instanceID int, ip net.IP, conn net.Conn) error
+	SendAck(ctx context.Context, instanceID int, mode string, conn net.Conn) error
+	SendCFG(ctx context.Context, instanceID int, mode string, weight int, conn net.Conn) error
+	SendELC(ctx context.Context, instanceID int, weight int, conn net.Conn) error
 }
 
 type Server interface {
-	Serve(ctx context.Context, resCh chan<- Message, errCh chan<- error)
+	ServeTCP(ctx context.Context, resCh chan<- Message, errCh chan<- error)
+	ServeUDP(ctx context.Context, resCh chan<- Message, errCh chan<- error)
 }
 
 type Message struct {
 	Name    string
 	Content any
+	Conn    net.Conn
 }
 
 type Instance struct {
 	clusterID     string
 	instanceID    int
 	ip            net.IP
+	conn          net.Conn
 	mode          string
 	weight        int
 	currentWeight int
@@ -105,11 +108,11 @@ func New(
 }
 
 func (i *Instance) Start(ctx context.Context) {
-	go i.server.Serve(ctx, i.resCh, i.errCh)
+	go i.server.ServeTCP(ctx, i.resCh, i.errCh)
 	go i.Handle(ctx, i.resCh)
 	go i.Check(i.checkInterval, i.checkScript, i.checkCh)
 
-	err := i.client.SendIAM(ctx, i.instanceID, i.ip)
+	err := i.client.SendIAM(ctx, i.instanceID, i.ip, nil)
 	if err != nil {
 		log.Printf("cannot send iam message: %v\n", err)
 	}
@@ -126,7 +129,7 @@ func (i *Instance) Start(ctx context.Context) {
 			if !c {
 				i.currentWeight = InstanceOff
 				if i.currentStep.Id == Leader {
-					err = i.client.SendELC(ctx, i.instanceID, i.currentWeight)
+					err = i.client.SendELC(ctx, i.instanceID, i.currentWeight, nil)
 					if err != nil {
 						log.Printf("cannot send message: %v\n", err)
 					}
@@ -151,15 +154,15 @@ func (i *Instance) Handle(ctx context.Context, resCh <-chan Message) {
 	case <-ctx.Done():
 		return
 	case msg := <-resCh:
-		i.handle(msg)
+		i.handle(ctx, msg)
 	}
 }
 
-func (i *Instance) handle(msg Message) {
+func (i *Instance) handle(ctx context.Context, msg Message) {
 	switch msg.Name {
 	case IAMMessage:
 		message := msg.Content.(IAM)
-		i.handleIAMMessage(message)
+		i.handleIAMMessage(ctx, message, msg.Conn)
 		break
 	case CFGMessage:
 		message := msg.Content.(CFG)
@@ -178,15 +181,26 @@ func (i *Instance) handle(msg Message) {
 	}
 }
 
-func (i *Instance) handleIAMMessage(msg IAM) {
+func (i *Instance) handleIAMMessage(ctx context.Context, msg IAM, conn net.Conn) {
 	log.Printf("found new instance: %s\n", msg.Ip)
+
+	if conn == nil {
+		log.Printf("conn is nil: %v\n", conn)
+		return
+	}
 
 	InstanceTable[msg.InstanceID] = &Instance{
 		clusterID:  i.clusterID,
 		instanceID: msg.InstanceID,
 		ip:         msg.Ip,
+		conn:       conn,
 		mode:       UNKNOWN,
 		weight:     0,
+	}
+
+	err := i.client.SendIAM(ctx, i.instanceID, i.ip, conn)
+	if err != nil {
+		log.Printf("cannot send AIM message: %v\n", err)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/hramov/aliver/internal/instance"
 	"github.com/joho/godotenv"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 )
@@ -37,9 +38,12 @@ func main() {
 
 	finiteStateMachine, currentStep := fsm.NewFsm()
 
-	client := v1.NewClient(cfg.App.Timeout)
+	client, err := v1.NewClient(cfg.App.BroadcastIp)
+	if err != nil {
+		log.Fatalf("cannot instantiate client: %v\n", err)
+	}
 
-	server := v1.NewServer(cfg.App.Port)
+	server := v1.NewServer(cfg.App.PortTCP, cfg.App.PortUDP, net.ParseIP(cfg.App.BroadcastIp), cfg.App.Timeout)
 
 	aliverInstance, err := instance.New(
 		cfg.App.ClusterID,

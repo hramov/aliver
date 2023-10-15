@@ -2,9 +2,12 @@ app:
   cluster_id: 'cluster'
   instance_id: 1
   ip: '127.0.0.1'
-  port: 6223
+  broadcast_ip: '127.0.0.1'
+  port_tcp: 6223
+  port_udp: 6224
   mode: 'master'
   weight: 10
+  timeout: '10s'
 
   check_script: 'scripts/check.sh'
   check_interval: '5s'
