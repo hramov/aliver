@@ -8,7 +8,6 @@ import (
 	"github.com/hramov/aliver/internal/instance"
 	"github.com/joho/godotenv"
 	"log"
-	"net"
 	"os"
 	"os/signal"
 )
@@ -43,7 +42,7 @@ func main() {
 		log.Fatalf("cannot instantiate client: %v\n", err)
 	}
 
-	server := v1.NewServer(cfg.App.InstanceID, cfg.App.PortTCP, cfg.App.PortUDP, net.ParseIP(cfg.App.Ip), cfg.App.Mask, cfg.App.Timeout)
+	server := v1.NewServer(cfg.App.InstanceID, cfg.App.Ip, cfg.App.Mask, cfg.App.Broadcast, cfg.App.PortTCP, cfg.App.PortUDP, cfg.App.Timeout)
 
 	aliverInstance, err := instance.New(
 		cfg.App.ClusterID,

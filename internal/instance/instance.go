@@ -63,7 +63,7 @@ type Instance struct {
 var InstanceTable = make(map[int]*Instance)
 
 func New(
-	clusterId string, id int, ip string, mode string, weight int,
+	clusterId string, id int, ip net.IP, mode string, weight int,
 	checkScript string, checkInterval time.Duration, checkRetries int, checkTimeout time.Duration,
 	runScript string, runTimeout time.Duration,
 	stopScript string, stopTimeout time.Duration,
@@ -71,15 +71,10 @@ func New(
 	client HttpClient,
 	server Server,
 ) (*Instance, error) {
-	parsedIp := net.ParseIP(ip)
-	if parsedIp == nil {
-		return nil, fmt.Errorf("ip is not correct")
-	}
-
 	inst := &Instance{
 		clusterID:     clusterId,
 		instanceID:    id,
-		ip:            net.ParseIP(ip),
+		ip:            ip,
 		mode:          mode,
 		weight:        weight,
 		currentWeight: weight,
@@ -256,7 +251,7 @@ func (i *Instance) checkInstances(ctx context.Context) {
 				if time.Since(inst.lastActive) > 3*i.checkTimeout {
 					log.Printf("instance %s is not active\n", inst.ip)
 					if inst.mode == LEADER {
-						log.Printf("instance %s was the leader, need to choose another one\n", inst.ip)
+						log.Printf("instance %s was the leader\n", inst.ip)
 						// TODO send ELC to all other instances to choose a new leader
 					}
 				}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"gopkg.in/yaml.v3"
+	"net"
 	"os"
 	"time"
 )
@@ -11,10 +12,11 @@ const AppVersion = "0.0.1"
 type App struct {
 	Version string
 
-	ClusterID  string        `yaml:"cluster_id"`
-	InstanceID int           `yaml:"instance_id"`
-	Ip         string        `yaml:"ip"`
-	Mask       int           `yaml:"mask"`
+	ClusterID  string `yaml:"cluster_id"`
+	InstanceID int    `yaml:"instance_id"`
+	Ip         net.IP
+	Mask       net.IPMask
+	Broadcast  net.IP
 	PortTCP    int           `yaml:"port_tcp"`
 	PortUDP    int           `yaml:"port_udp"`
 	Mode       string        `yaml:"mode"`
@@ -45,6 +47,36 @@ func LoadConfig(configPath string, cfg *Config) error {
 	err = yaml.Unmarshal(data, cfg)
 
 	cfg.App.Version = AppVersion
+
+	ifaces, _ := net.Interfaces()
+	var ip net.IP
+	var mask net.IPMask
+
+	// TODO set interface in config.yml
+	for _, i := range ifaces {
+		addrs, _ := i.Addrs()
+		for _, addr := range addrs {
+			switch v := addr.(type) {
+			case *net.IPNet:
+				if v.IP.String() != "127.0.0.1" {
+					ip = v.IP
+					mask = v.Mask
+				}
+			}
+		}
+	}
+
+	broadcast := net.ParseIP("0.0.0.0").To4()
+
+	ip = ip.To4()
+
+	for i := 0; i < len(ip); i++ {
+		broadcast[i] = ip[i] | ^mask[i]
+	}
+
+	cfg.App.Ip = ip
+	cfg.App.Mask = mask
+	cfg.App.Broadcast = broadcast
 
 	return err
 }

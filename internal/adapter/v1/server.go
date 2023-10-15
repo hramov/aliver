@@ -30,25 +30,21 @@ type rawMessageType struct {
 	Content any    `json:"content"`
 }
 
-func NewServer(instanceId, portTcp, portUdp int, ip net.IP, mask int, timeout time.Duration) *Server {
-	m := net.CIDRMask(mask, 32)
-	broadcast := net.ParseIP("0.0.0.0").To4()
-
-	ip2 := net.ParseIP(ip.String()).To4()
-
-	for i := 0; i < len(ip2); i++ {
-		broadcast[i] = ip2[i] | ^m[i]
-	}
+func NewServer(instanceId int, ip net.IP, mask net.IPMask, broadcast net.IP, portTcp, portUdp int, timeout time.Duration) *Server {
 
 	return &Server{
 		instanceId: instanceId,
-		ip:         ip2,
+		ip:         ip.To4(),
 		portTcp:    portTcp,
 		portUdp:    portUdp,
-		mask:       m,
+		mask:       mask,
 		broadcast:  broadcast,
 		timeout:    timeout,
 	}
+}
+
+func (s *Server) GetUDPPort() int {
+	return s.portUdp
 }
 
 func (s *Server) ServeTCP(ctx context.Context, resCh chan<- instance.Message, errCh chan<- error) {
@@ -111,7 +107,12 @@ func (s *Server) ServeTCP(ctx context.Context, resCh chan<- instance.Message, er
 }
 
 func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, errCh chan<- error) {
-	pc, err := net.ListenPacket(UDP, fmt.Sprintf(":%d", s.portUdp))
+	udpConn, err := net.ListenUDP(UDP, &net.UDPAddr{
+		IP:   nil,
+		Port: s.portUdp,
+		Zone: "",
+	})
+
 	if err != nil {
 		log.Printf("cannot listen udp: %v\n", err)
 	}
@@ -120,10 +121,9 @@ func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, er
 		if err != nil {
 			log.Printf("cannot close listener: %v\n", err)
 		}
-	}(pc)
+	}(udpConn)
 
-	log.Printf("sending broadcast IAM message")
-	go s.health(ctx, pc)
+	go s.health(ctx)
 
 	var messageName string
 	var message any
@@ -134,7 +134,8 @@ func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, er
 	for {
 		buf := make([]byte, 1024)
 
-		n, _, err = pc.ReadFrom(buf)
+		n, _, err = udpConn.ReadFromUDP(buf)
+
 		if err != nil {
 			log.Printf("cannot read from listener: %v\n", err)
 			continue
@@ -162,17 +163,23 @@ func (s *Server) parse(body []byte) (string, any, error) {
 	return message.Name, message.Content, nil
 }
 
-func (s *Server) health(ctx context.Context, pc net.PacketConn) {
+func (s *Server) health(ctx context.Context) {
+	udpConn, err := net.ListenUDP(UDP, &net.UDPAddr{
+		IP:   net.ParseIP(s.broadcast.String()),
+		Port: s.portUdp,
+		Zone: "",
+	})
+
+	if err != nil {
+		log.Printf("cannot listen udp: %v\n", err)
+		return
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			addr, err := net.ResolveUDPAddr(UDP, s.broadcast.String()+fmt.Sprintf(":%d", s.portUdp))
-			if err != nil {
-				log.Printf("cannot resolve udp address: %v\n", err)
-			}
-
 			message := instance.IAM{
 				InstanceID: s.instanceId,
 				Ip:         s.ip,
@@ -189,15 +196,13 @@ func (s *Server) health(ctx context.Context, pc net.PacketConn) {
 				continue
 			}
 
-			_, err = pc.WriteTo(rawMsgBytes, addr)
+			log.Printf("sending broadcast IAM message to %v\n", s.broadcast.String()+fmt.Sprintf(":%d", s.portUdp))
+
+			_, err = udpConn.WriteToUDP(rawMsgBytes, udpConn.RemoteAddr().(*net.UDPAddr))
 			if err != nil {
 				log.Printf("cannot write to pc: %v\n", err)
 			}
 		}
 		time.Sleep(s.timeout)
 	}
-}
-
-func (s *Server) GetUDPPort() int {
-	return s.portUdp
 }
