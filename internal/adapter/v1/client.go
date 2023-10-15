@@ -9,23 +9,15 @@ import (
 	"sync"
 )
 
-type Client struct {
-	broadcast net.IP
-}
+type Client struct{}
 
 var ClientInstance *Client
+
 var once sync.Once
 
-func NewClient(broadcastIp string) (*Client, error) {
-	broadcast := net.ParseIP(broadcastIp)
-	if broadcast == nil {
-		return nil, fmt.Errorf("broadcast IP is nil")
-	}
-
+func NewClient() (*Client, error) {
 	once.Do(func() {
-		ClientInstance = &Client{
-			broadcast: net.ParseIP(broadcastIp),
-		}
+		ClientInstance = &Client{}
 	})
 	return ClientInstance, nil
 }
@@ -47,9 +39,7 @@ func (c *Client) SendIAM(ctx context.Context, instanceID int, ip net.IP, conn ne
 		_, err = conn.Write(rawMsgBytes)
 		return err
 	}
-
-	//TODO send broadcast message
-	return nil
+	return fmt.Errorf("conn is nil")
 }
 
 func (c *Client) SendAck(ctx context.Context, instanceID int, mode string, conn net.Conn) error {

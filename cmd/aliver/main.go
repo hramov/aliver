@@ -14,14 +14,14 @@ import (
 )
 
 func main() {
-	if os.Getenv("ENV") == "" {
+	if os.Getenv("ALIVER_ENV") == "" {
 		err := godotenv.Load()
 		if err != nil {
 			log.Fatal("error loading .env file")
 		}
 	}
 
-	configPath := os.Getenv("CONFIG_PATH")
+	configPath := os.Getenv("ALIVER_CONFIG_PATH")
 	if configPath == "" {
 		log.Fatal("config path env is not set")
 	}
@@ -38,12 +38,12 @@ func main() {
 
 	finiteStateMachine, currentStep := fsm.NewFsm()
 
-	client, err := v1.NewClient(cfg.App.BroadcastIp)
+	client, err := v1.NewClient()
 	if err != nil {
 		log.Fatalf("cannot instantiate client: %v\n", err)
 	}
 
-	server := v1.NewServer(cfg.App.PortTCP, cfg.App.PortUDP, net.ParseIP(cfg.App.BroadcastIp), cfg.App.Timeout)
+	server := v1.NewServer(cfg.App.InstanceID, cfg.App.PortTCP, cfg.App.PortUDP, net.ParseIP(cfg.App.Ip), net.ParseIP(cfg.App.BroadcastIp), cfg.App.Timeout)
 
 	aliverInstance, err := instance.New(
 		cfg.App.ClusterID,

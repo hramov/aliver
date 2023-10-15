@@ -12,6 +12,7 @@ import (
 
 const (
 	UDP = "udp4"
+	TCP = "tcp"
 )
 
 type Server struct {
@@ -44,11 +45,13 @@ func (s *Server) ServeTCP(ctx context.Context, resCh chan<- instance.Message, er
 	var conn net.Conn
 	var err error
 
-	ln, err = net.Listen("tcp", fmt.Sprintf(":%d", s.portTcp))
+	ln, err = net.Listen(TCP, fmt.Sprintf(":%d", s.portTcp))
 	if err != nil {
 		errCh <- err
 		return
 	}
+
+	log.Printf("TCP server started on %d\n", s.portTcp)
 
 	for {
 		if ctx.Err() != nil {
@@ -73,7 +76,6 @@ func (s *Server) ServeTCP(ctx context.Context, resCh chan<- instance.Message, er
 		var messageName string
 		var rawMessage any
 
-		// rawMessage format: "{ \"name\": \"IAM\", \"content\": { \"instance_id\": 1, \"ip\": \"127.0.0.1\" } }"
 		messageName, rawMessage, err = s.parse(buf)
 		if err != nil {
 			errCh <- fmt.Errorf("cannot parse message body: %v", err)
@@ -100,7 +102,7 @@ func (s *Server) ServeTCP(ctx context.Context, resCh chan<- instance.Message, er
 func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, errCh chan<- error) {
 	pc, err := net.ListenPacket(UDP, fmt.Sprintf(":%d", s.portUdp))
 	if err != nil {
-		panic(err)
+		log.Printf("cannot listen udp: %v\n", err)
 	}
 	defer func(pc net.PacketConn) {
 		err = pc.Close()
@@ -109,22 +111,27 @@ func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, er
 		}
 	}(pc)
 
+	log.Printf("sending broadcast IAM message")
 	go s.health(ctx, pc)
 
 	var messageName string
 	var message any
+	var n int
+
+	log.Printf("UDP server started on %d\n", s.portUdp)
 
 	for {
-		buf := make([]byte, 4096)
-		_, _, err = pc.ReadFrom(buf)
+		buf := make([]byte, 1024)
+
+		n, _, err = pc.ReadFrom(buf)
 		if err != nil {
 			log.Printf("cannot read from listener: %v\n", err)
 			continue
 		}
 
-		messageName, message, err = s.parse(buf)
+		messageName, message, err = s.parse(buf[0:n])
 		if err != nil {
-			errCh <- err
+			errCh <- fmt.Errorf("cannot parse message body: %v\n", err)
 			continue
 		}
 
@@ -146,14 +153,13 @@ func (s *Server) parse(body []byte) (string, any, error) {
 
 func (s *Server) health(ctx context.Context, pc net.PacketConn) {
 	for {
-		time.Sleep(s.timeout)
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			addr, err := net.ResolveUDPAddr(UDP, s.broadcast.String())
+			addr, err := net.ResolveUDPAddr(UDP, s.broadcast.String()+fmt.Sprintf(":%d", s.portUdp))
 			if err != nil {
-				panic(err)
+				log.Printf("cannot resolve udp address: %v\n", err)
 			}
 
 			message := instance.IAM{
@@ -177,5 +183,10 @@ func (s *Server) health(ctx context.Context, pc net.PacketConn) {
 				log.Printf("cannot write to pc: %v\n", err)
 			}
 		}
+		time.Sleep(s.timeout)
 	}
+}
+
+func (s *Server) GetUDPPort() int {
+	return s.portUdp
 }

@@ -19,6 +19,7 @@ type HttpClient interface {
 type Server interface {
 	ServeTCP(ctx context.Context, resCh chan<- Message, errCh chan<- error)
 	ServeUDP(ctx context.Context, resCh chan<- Message, errCh chan<- error)
+	GetUDPPort() int
 }
 
 type Message struct {
@@ -109,13 +110,11 @@ func New(
 
 func (i *Instance) Start(ctx context.Context) {
 	go i.server.ServeTCP(ctx, i.resCh, i.errCh)
-	go i.Handle(ctx, i.resCh)
-	go i.Check(i.checkInterval, i.checkScript, i.checkCh)
+	go i.server.ServeUDP(ctx, i.resCh, i.errCh)
 
-	err := i.client.SendIAM(ctx, i.instanceID, i.ip, nil)
-	if err != nil {
-		log.Printf("cannot send iam message: %v\n", err)
-	}
+	go i.check(i.checkInterval, i.checkScript, i.checkCh)
+
+	go i.Handle(ctx, i.resCh)
 
 	for {
 		select {
@@ -129,7 +128,7 @@ func (i *Instance) Start(ctx context.Context) {
 			if !c {
 				i.currentWeight = InstanceOff
 				if i.currentStep.Id == Leader {
-					err = i.client.SendELC(ctx, i.instanceID, i.currentWeight, nil)
+					err := i.client.SendELC(ctx, i.instanceID, i.currentWeight, nil)
 					if err != nil {
 						log.Printf("cannot send message: %v\n", err)
 					}
@@ -161,7 +160,16 @@ func (i *Instance) Handle(ctx context.Context, resCh <-chan Message) {
 func (i *Instance) handle(ctx context.Context, msg Message) {
 	switch msg.Name {
 	case IAMMessage:
-		message := msg.Content.(IAM)
+		messageMap := msg.Content.(map[string]any)
+		message := IAM{
+			InstanceID: int(messageMap["instance_id"].(float64)),
+			Ip:         net.ParseIP(messageMap["ip"].(string)),
+		}
+
+		if message.InstanceID == i.instanceID {
+			return
+		}
+
 		i.handleIAMMessage(ctx, message, msg.Conn)
 		break
 	case CFGMessage:
@@ -182,12 +190,24 @@ func (i *Instance) handle(ctx context.Context, msg Message) {
 }
 
 func (i *Instance) handleIAMMessage(ctx context.Context, msg IAM, conn net.Conn) {
+	var err error
+
 	log.Printf("found new instance: %s\n", msg.Ip)
 
 	if conn == nil {
-		log.Printf("conn is nil: %v\n", conn)
-		return
+		// from UDP
+		conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", msg.Ip.String(), i.server.GetUDPPort()))
+		if err != nil {
+			log.Printf("cannot dial tcp: %v\n", err)
+		}
+
+		err = i.client.SendIAM(ctx, i.instanceID, i.ip, conn)
+		if err != nil {
+			log.Printf("cannot send IAM message: %v\n", err)
+		}
 	}
+
+	log.Printf("connected to new instance: %s\n", msg.Ip)
 
 	InstanceTable[msg.InstanceID] = &Instance{
 		clusterID:  i.clusterID,
@@ -196,11 +216,6 @@ func (i *Instance) handleIAMMessage(ctx context.Context, msg IAM, conn net.Conn)
 		conn:       conn,
 		mode:       UNKNOWN,
 		weight:     0,
-	}
-
-	err := i.client.SendIAM(ctx, i.instanceID, i.ip, conn)
-	if err != nil {
-		log.Printf("cannot send AIM message: %v\n", err)
 	}
 }
 
@@ -216,7 +231,7 @@ func (i *Instance) handleELCMessage(msg ELC) {
 
 }
 
-func (i *Instance) Check(interval time.Duration, script string, check chan<- bool) {
+func (i *Instance) check(interval time.Duration, script string, check chan<- bool) {
 	for {
 		time.Sleep(interval)
 		check <- true
