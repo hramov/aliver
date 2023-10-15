@@ -36,6 +36,7 @@ type Instance struct {
 	mode          string
 	weight        int
 	currentWeight int
+	lastActive    time.Time
 
 	checkScript   string
 	checkInterval time.Duration
@@ -209,6 +210,20 @@ func (i *Instance) handleIAMMessage(ctx context.Context, msg IAM, conn net.Conn)
 
 	log.Printf("connected to new instance: %s\n", msg.Ip)
 
+	if _, ok := InstanceTable[msg.InstanceID]; !ok {
+		InstanceTable[msg.InstanceID] = &Instance{
+			clusterID:  i.clusterID,
+			instanceID: msg.InstanceID,
+			ip:         msg.Ip,
+			conn:       conn,
+			mode:       UNKNOWN,
+			weight:     0,
+			lastActive: time.Now(),
+		}
+	} else {
+		InstanceTable[msg.InstanceID].lastActive = time.Now()
+	}
+
 	InstanceTable[msg.InstanceID] = &Instance{
 		clusterID:  i.clusterID,
 		instanceID: msg.InstanceID,
@@ -229,6 +244,26 @@ func (i *Instance) handleACKMessage(msg ACK) {
 
 func (i *Instance) handleELCMessage(msg ELC) {
 
+}
+
+func (i *Instance) checkInstances(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			for _, inst := range InstanceTable {
+				if time.Since(inst.lastActive) > 3*i.checkTimeout {
+					log.Printf("instance %s is not active\n", inst.ip)
+					if inst.mode == LEADER {
+						log.Printf("instance %s was the leader, need to choose another one\n", inst.ip)
+						// TODO send ELC to all other instances to choose a new leader
+					}
+				}
+			}
+			time.Sleep(i.checkInterval)
+		}
+	}
 }
 
 func (i *Instance) check(interval time.Duration, script string, check chan<- bool) {
