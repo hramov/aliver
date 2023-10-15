@@ -6,17 +6,17 @@ import (
 	"time"
 )
 
-type App struct {
-	Name    string `yaml:"name"`
-	Version string `yaml:"version"`
+const AppVersion = "0.0.1"
 
-	ClusterID  string        `yaml:"cluster_id"`
-	InstanceID int           `yaml:"instance_id"`
-	Ip         string        `yaml:"ip"`
-	Port       int           `yaml:"port"`
-	Mode       string        `yaml:"mode"`
-	Weight     int           `yaml:"weight"`
-	Timeout    time.Duration `yaml:"timeout"`
+type App struct {
+	Version string
+
+	ClusterID  string `yaml:"cluster_id"`
+	InstanceID int    `yaml:"instance_id"`
+	Ip         string `yaml:"ip"`
+	Port       int    `yaml:"port"`
+	Mode       string `yaml:"mode"`
+	Weight     int    `yaml:"weight"`
 
 	CheckScript   string        `yaml:"check_script"`
 	CheckInterval time.Duration `yaml:"check_interval"`
@@ -40,5 +40,8 @@ func LoadConfig(configPath string, cfg *Config) error {
 		return err
 	}
 	err = yaml.Unmarshal(data, cfg)
+
+	cfg.App.Version = AppVersion
+
 	return err
 }
