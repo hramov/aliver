@@ -1,0 +1,22 @@
+app:
+  name: 'aliver'
+  version: '1.0.0'
+
+  cluster_id: 'cluster'
+  instance_id: 1
+  ip: '127.0.0.1'
+  port: 6223
+  mode: 'master'
+  weight: 10
+  timeout: '10s'
+
+  check_script: 'scripts/check.sh'
+  check_interval: '5s'
+  check_retries: 5
+  check_timeout: '10s'
+
+  run_script: 'scripts/run.sh'
+  run_timeout: '10s'
+
+  stop_script: 'scripts/stop.sh'
+  stop_timeout: '10s'
