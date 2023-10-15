@@ -108,7 +108,7 @@ func (s *Server) ServeTCP(ctx context.Context, resCh chan<- instance.Message, er
 
 func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, errCh chan<- error) {
 	udpConn, err := net.ListenUDP(UDP, &net.UDPAddr{
-		IP:   nil,
+		IP:   s.broadcast.To4(),
 		Port: s.portUdp,
 		Zone: "",
 	})
@@ -123,7 +123,7 @@ func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, er
 		}
 	}(udpConn)
 
-	go s.health(ctx)
+	go s.health(ctx, udpConn)
 
 	var messageName string
 	var message any
@@ -163,18 +163,7 @@ func (s *Server) parse(body []byte) (string, any, error) {
 	return message.Name, message.Content, nil
 }
 
-func (s *Server) health(ctx context.Context) {
-	udpConn, err := net.ListenUDP(UDP, &net.UDPAddr{
-		IP:   net.ParseIP(s.broadcast.String()),
-		Port: s.portUdp,
-		Zone: "",
-	})
-
-	if err != nil {
-		log.Printf("cannot listen udp: %v\n", err)
-		return
-	}
-
+func (s *Server) health(ctx context.Context, udpConn *net.UDPConn) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -198,7 +187,12 @@ func (s *Server) health(ctx context.Context) {
 
 			log.Printf("sending broadcast IAM message to %v\n", s.broadcast.String()+fmt.Sprintf(":%d", s.portUdp))
 
-			_, err = udpConn.WriteToUDP(rawMsgBytes, udpConn.RemoteAddr().(*net.UDPAddr))
+			_, err = udpConn.WriteToUDP(rawMsgBytes, &net.UDPAddr{
+				IP:   s.broadcast.To4(),
+				Port: s.portUdp,
+				Zone: "",
+			})
+
 			if err != nil {
 				log.Printf("cannot write to pc: %v\n", err)
 			}
