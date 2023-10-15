@@ -1,2 +1,6 @@
 .idea
 .env
+deploy
+Dockerfile
+docker-compose.yml
+config2.yml

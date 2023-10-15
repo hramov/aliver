@@ -18,6 +18,7 @@ const (
 type Server struct {
 	instanceId int
 	ip         net.IP
+	mask       net.IPMask
 	portTcp    int
 	portUdp    int
 	broadcast  net.IP
@@ -29,12 +30,22 @@ type rawMessageType struct {
 	Content any    `json:"content"`
 }
 
-func NewServer(instanceId, portTcp, portUdp int, ip net.IP, broadcast net.IP, timeout time.Duration) *Server {
+func NewServer(instanceId, portTcp, portUdp int, ip net.IP, mask int, timeout time.Duration) *Server {
+	m := net.CIDRMask(mask, 32)
+	broadcast := net.ParseIP("0.0.0.0").To4()
+
+	ip2 := net.ParseIP(ip.String()).To4()
+
+	for i := 0; i < len(ip2); i++ {
+		broadcast[i] = ip2[i] | ^m[i]
+	}
+
 	return &Server{
 		instanceId: instanceId,
-		ip:         ip,
+		ip:         ip2,
 		portTcp:    portTcp,
 		portUdp:    portUdp,
+		mask:       m,
 		broadcast:  broadcast,
 		timeout:    timeout,
 	}
