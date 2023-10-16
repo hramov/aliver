@@ -7,6 +7,7 @@ import (
 	"github.com/hramov/aliver/internal/instance"
 	"log"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -45,6 +46,10 @@ func NewServer(instanceId int, ip net.IP, mask net.IPMask, broadcast net.IP, por
 
 func (s *Server) GetUDPPort() int {
 	return s.portUdp
+}
+
+func (s *Server) GetTCPPort() int {
+	return s.portTcp
 }
 
 func (s *Server) ServeTCP(ctx context.Context, resCh chan<- instance.Message, errCh chan<- error) {
@@ -107,41 +112,36 @@ func (s *Server) ServeTCP(ctx context.Context, resCh chan<- instance.Message, er
 }
 
 func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, errCh chan<- error) {
-	udpConn, err := net.ListenUDP(UDP, &net.UDPAddr{
-		IP:   s.broadcast.To4(),
-		Port: s.portUdp,
-		Zone: "",
-	})
-
+	pc, err := net.ListenPacket("udp4", fmt.Sprintf(":%d", s.portUdp))
 	if err != nil {
-		log.Printf("cannot listen udp: %v\n", err)
+		panic(err)
 	}
 	defer func(pc net.PacketConn) {
 		err = pc.Close()
 		if err != nil {
-			log.Printf("cannot close listener: %v\n", err)
+			log.Printf("cannot close udp listener: %v\n", err)
 		}
-	}(udpConn)
+	}(pc)
 
-	go s.health(ctx, udpConn)
+	go s.health(ctx, pc)
 
 	var messageName string
 	var message any
+	var addr net.Addr
 	var n int
 
 	log.Printf("UDP server started on %d\n", s.portUdp)
+	buf := make([]byte, 128)
 
 	for {
-		buf := make([]byte, 1024)
-
-		n, _, err = udpConn.ReadFromUDP(buf)
+		n, addr, err = pc.ReadFrom(buf)
 
 		if err != nil {
-			log.Printf("cannot read from listener: %v\n", err)
+			errCh <- fmt.Errorf("cannot read from listener: %v\n", err)
 			continue
 		}
 
-		messageName, message, err = s.parse(buf[0:n])
+		messageName, message, err = s.parse(buf[:n])
 		if err != nil {
 			errCh <- fmt.Errorf("cannot parse message body: %v\n", err)
 			continue
@@ -150,11 +150,16 @@ func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, er
 		resCh <- instance.Message{
 			Name:    messageName,
 			Content: message,
+			Ip:      net.ParseIP(strings.Split(addr.String(), ":")[0]),
 		}
 	}
 }
 
 func (s *Server) parse(body []byte) (string, any, error) {
+	if len(body) == 0 {
+		return "", nil, fmt.Errorf("empty body")
+	}
+
 	message := rawMessageType{}
 	err := json.Unmarshal(body, &message)
 	if err != nil {
@@ -163,7 +168,7 @@ func (s *Server) parse(body []byte) (string, any, error) {
 	return message.Name, message.Content, nil
 }
 
-func (s *Server) health(ctx context.Context, udpConn *net.UDPConn) {
+func (s *Server) health(ctx context.Context, pc net.PacketConn) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -185,17 +190,18 @@ func (s *Server) health(ctx context.Context, udpConn *net.UDPConn) {
 				continue
 			}
 
-			log.Printf("sending broadcast IAM message to %v\n", s.broadcast.String()+fmt.Sprintf(":%d", s.portUdp))
+			addr, err := net.ResolveUDPAddr("udp4", s.broadcast.String()+fmt.Sprintf(":%d", s.portUdp))
+			if err != nil {
+				log.Printf("cannot resolve udp address: %v\n", err)
+				continue
+			}
 
-			_, err = udpConn.WriteToUDP(rawMsgBytes, &net.UDPAddr{
-				IP:   s.broadcast.To4(),
-				Port: s.portUdp,
-				Zone: "",
-			})
-
+			_, err = pc.WriteTo(rawMsgBytes, addr)
 			if err != nil {
 				log.Printf("cannot write to pc: %v\n", err)
+				continue
 			}
+
 		}
 		time.Sleep(s.timeout)
 	}

@@ -20,11 +20,13 @@ type Server interface {
 	ServeTCP(ctx context.Context, resCh chan<- Message, errCh chan<- error)
 	ServeUDP(ctx context.Context, resCh chan<- Message, errCh chan<- error)
 	GetUDPPort() int
+	GetTCPPort() int
 }
 
 type Message struct {
 	Name    string
 	Content any
+	Ip      net.IP
 	Conn    net.Conn
 }
 
@@ -108,9 +110,9 @@ func (i *Instance) Start(ctx context.Context) {
 	go i.server.ServeTCP(ctx, i.resCh, i.errCh)
 	go i.server.ServeUDP(ctx, i.resCh, i.errCh)
 
-	go i.check(i.checkInterval, i.checkScript, i.checkCh)
+	go i.check()
 
-	go i.Handle(ctx, i.resCh)
+	go i.Handle(ctx)
 
 	for {
 		select {
@@ -144,12 +146,14 @@ func (i *Instance) Start(ctx context.Context) {
 	}
 }
 
-func (i *Instance) Handle(ctx context.Context, resCh <-chan Message) {
-	select {
-	case <-ctx.Done():
-		return
-	case msg := <-resCh:
-		i.handle(ctx, msg)
+func (i *Instance) Handle(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-i.resCh:
+			i.handle(ctx, msg)
+		}
 	}
 }
 
@@ -159,7 +163,7 @@ func (i *Instance) handle(ctx context.Context, msg Message) {
 		messageMap := msg.Content.(map[string]any)
 		message := IAM{
 			InstanceID: int(messageMap["instance_id"].(float64)),
-			Ip:         net.ParseIP(messageMap["ip"].(string)),
+			Ip:         msg.Ip,
 		}
 
 		if message.InstanceID == i.instanceID {
@@ -188,24 +192,25 @@ func (i *Instance) handle(ctx context.Context, msg Message) {
 func (i *Instance) handleIAMMessage(ctx context.Context, msg IAM, conn net.Conn) {
 	var err error
 
-	log.Printf("found new instance: %s\n", msg.Ip)
-
-	if conn == nil {
-		// from UDP
-		conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", msg.Ip.String(), i.server.GetUDPPort()))
-		if err != nil {
-			log.Printf("cannot dial tcp: %v\n", err)
-		}
-
-		err = i.client.SendIAM(ctx, i.instanceID, i.ip, conn)
-		if err != nil {
-			log.Printf("cannot send IAM message: %v\n", err)
-		}
-	}
-
-	log.Printf("connected to new instance: %s\n", msg.Ip)
-
 	if _, ok := InstanceTable[msg.InstanceID]; !ok {
+
+		log.Printf("found new instance: %s (self: %s)\n", msg.Ip, i.ip.String())
+
+		if conn == nil {
+			// from UDP
+			conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", msg.Ip.String(), i.server.GetTCPPort()))
+			if err != nil {
+				log.Printf("cannot dial tcp: %v\n", err)
+			}
+
+			err = i.client.SendIAM(ctx, i.instanceID, i.ip, conn)
+			if err != nil {
+				log.Printf("cannot send IAM message: %v\n", err)
+			}
+		}
+
+		log.Printf("connected to new instance: %s\n", msg.Ip)
+
 		InstanceTable[msg.InstanceID] = &Instance{
 			clusterID:  i.clusterID,
 			instanceID: msg.InstanceID,
@@ -217,15 +222,6 @@ func (i *Instance) handleIAMMessage(ctx context.Context, msg IAM, conn net.Conn)
 		}
 	} else {
 		InstanceTable[msg.InstanceID].lastActive = time.Now()
-	}
-
-	InstanceTable[msg.InstanceID] = &Instance{
-		clusterID:  i.clusterID,
-		instanceID: msg.InstanceID,
-		ip:         msg.Ip,
-		conn:       conn,
-		mode:       UNKNOWN,
-		weight:     0,
 	}
 }
 
@@ -261,10 +257,10 @@ func (i *Instance) checkInstances(ctx context.Context) {
 	}
 }
 
-func (i *Instance) check(interval time.Duration, script string, check chan<- bool) {
+func (i *Instance) check() {
 	for {
-		time.Sleep(interval)
-		check <- true
+		time.Sleep(i.checkInterval)
+		i.checkCh <- true
 	}
 }
 
