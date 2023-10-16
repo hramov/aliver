@@ -139,6 +139,10 @@ func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, er
 				continue
 			}
 
+			if n == 0 {
+				continue
+			}
+
 			messageName, message, err = s.parse(buf[:n])
 			if err != nil {
 				errCh <- fmt.Errorf("cannot parse message body: %v\n", err)
