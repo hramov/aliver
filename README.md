@@ -10,11 +10,15 @@
 app:
   cluster_id: 'cluster' // must be equal to all of the servers in cluster
   instance_id: 1 // must be unique in cluster
-  ip: '127.0.0.1' // ip of the machine
-  port: 6223 // must be equal to all of the servers in cluster
+  
+  port_tcp: 6223 // must be equal to all of the servers in cluster
+  port_udp: 6224 // must be equal to all of the servers in cluster
+  
   mode: 'master' // [ follower ] - initial state for machine
   weight: 10 // probability of choosing to be the leader
-
+  
+  timeout: '10s' // timeout for checking the servers in cluster
+    
   check_script: 'scripts/check.sh' // script to be executed to check whether the service dead or alive
   check_interval: '5s'
   check_retries: 5
