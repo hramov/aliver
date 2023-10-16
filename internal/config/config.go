@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"gopkg.in/yaml.v3"
 	"net"
 	"os"
@@ -14,6 +15,7 @@ type App struct {
 
 	ClusterID  string `yaml:"cluster_id"`
 	InstanceID int    `yaml:"instance_id"`
+	Interface  string `yaml:"interface"`
 	Ip         net.IP
 	Mask       net.IPMask
 	Broadcast  net.IP
@@ -52,18 +54,38 @@ func LoadConfig(configPath string, cfg *Config) error {
 	var ip net.IP
 	var mask net.IPMask
 
-	// TODO set interface in config.yml
 	for _, i := range ifaces {
-		addrs, _ := i.Addrs()
-		for _, addr := range addrs {
-			switch v := addr.(type) {
-			case *net.IPNet:
-				if v.IP.String() != "127.0.0.1" {
-					ip = v.IP
-					mask = v.Mask
+		if i.Name == cfg.App.Interface {
+			addrs, _ := i.Addrs()
+
+			if len(addrs) == 0 {
+				return fmt.Errorf("interface %s has no IP addresses", cfg.App.Interface)
+			}
+
+			if len(addrs) > 1 && cfg.App.Ip == nil {
+				return fmt.Errorf("interface %s has multiple IP addresses and no IP address was specified", cfg.App.Interface)
+			}
+
+			if len(addrs) > 1 && cfg.App.Ip != nil {
+				for _, addr := range addrs {
+					v := addr.(*net.IPNet)
+					if v.IP.String() == cfg.App.Ip.String() {
+						ip = v.IP
+						mask = v.Mask
+					}
 				}
 			}
+
+			if len(addrs) == 1 {
+				v := addrs[0].(*net.IPNet)
+				ip = v.IP
+				mask = v.Mask
+			}
 		}
+	}
+
+	if ip == nil || mask == nil {
+		return fmt.Errorf("ip address or mask is nil on interface %s\n", cfg.App.Interface)
 	}
 
 	broadcast := net.ParseIP("0.0.0.0").To4()

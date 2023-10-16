@@ -1,6 +1,7 @@
 app:
   cluster_id: 'cluster'
   instance_id: 1
+  interface: 'eth0'
   port_tcp: 6223
   port_udp: 6224
   mode: 'master'

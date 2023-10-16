@@ -104,7 +104,7 @@ func (s *Server) ServeTCP(ctx context.Context, resCh chan<- instance.Message, er
 }
 
 func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, errCh chan<- error) {
-	pc, err := net.ListenPacket("udp4", fmt.Sprintf(":%d", s.portUdp))
+	pc, err := net.ListenPacket(UDP, fmt.Sprintf(":%d", s.portUdp))
 	if err != nil {
 		errCh <- fmt.Errorf("cannot listen udp, returning: %v\n", err)
 		return
@@ -193,7 +193,7 @@ func (s *Server) health(ctx context.Context, pc net.PacketConn) {
 				continue
 			}
 
-			addr, err := net.ResolveUDPAddr("udp4", s.broadcast.String()+fmt.Sprintf(":%d", s.portUdp))
+			addr, err := net.ResolveUDPAddr(UDP, s.broadcast.String()+fmt.Sprintf(":%d", s.portUdp))
 			if err != nil {
 				log.Printf("cannot resolve udp address: %v\n", err)
 				continue

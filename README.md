@@ -10,7 +10,8 @@
 app:
   cluster_id: 'cluster' // must be equal to all of the servers in cluster
   instance_id: 1 // must be unique in cluster
-  
+
+  interface: 'eth0'
   port_tcp: 6223 // must be equal to all of the servers in cluster
   port_udp: 6224 // must be equal to all of the servers in cluster
   
