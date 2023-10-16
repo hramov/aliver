@@ -59,51 +59,51 @@ func (s *Server) ServeTCP(ctx context.Context, resCh chan<- instance.Message, er
 
 	ln, err = net.Listen(TCP, fmt.Sprintf(":%d", s.portTcp))
 	if err != nil {
-		errCh <- err
+		errCh <- fmt.Errorf("cannot listen tcp, returning: %v\n", err)
 		return
 	}
 
 	log.Printf("TCP server started on %d\n", s.portTcp)
 
 	for {
-		if ctx.Err() != nil {
-			errCh <- ctx.Err()
+		select {
+		case <-ctx.Done():
 			return
-		}
-
-		conn, err = ln.Accept()
-		if err != nil {
-			errCh <- err
-			return
-		}
-
-		var buf []byte
-
-		_, err = conn.Read(buf)
-		if err != nil {
-			errCh <- err
-			continue
-		}
-
-		var messageName string
-		var rawMessage any
-
-		messageName, rawMessage, err = s.parse(buf)
-		if err != nil {
-			errCh <- fmt.Errorf("cannot parse message body: %v", err)
-			continue
-		}
-
-		if messageName == instance.IAMMessage {
-			resCh <- instance.Message{
-				Name:    messageName,
-				Content: rawMessage,
-				Conn:    conn,
+		default:
+			conn, err = ln.Accept()
+			if err != nil {
+				errCh <- err
+				return
 			}
-		} else {
-			resCh <- instance.Message{
-				Name:    messageName,
-				Content: rawMessage,
+
+			var buf []byte
+
+			_, err = conn.Read(buf)
+			if err != nil {
+				errCh <- fmt.Errorf("cannot read from listener: %v\n", err)
+				continue
+			}
+
+			var messageName string
+			var rawMessage any
+
+			messageName, rawMessage, err = s.parse(buf)
+			if err != nil {
+				errCh <- fmt.Errorf("cannot parse message body: %v", err)
+				continue
+			}
+
+			if messageName == instance.IAMMessage {
+				resCh <- instance.Message{
+					Name:    messageName,
+					Content: rawMessage,
+					Conn:    conn,
+				}
+			} else {
+				resCh <- instance.Message{
+					Name:    messageName,
+					Content: rawMessage,
+				}
 			}
 		}
 
@@ -114,8 +114,10 @@ func (s *Server) ServeTCP(ctx context.Context, resCh chan<- instance.Message, er
 func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, errCh chan<- error) {
 	pc, err := net.ListenPacket("udp4", fmt.Sprintf(":%d", s.portUdp))
 	if err != nil {
-		panic(err)
+		errCh <- fmt.Errorf("cannot listen udp, returning: %v\n", err)
+		return
 	}
+
 	defer func(pc net.PacketConn) {
 		err = pc.Close()
 		if err != nil {
@@ -134,23 +136,28 @@ func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, er
 	buf := make([]byte, 128)
 
 	for {
-		n, addr, err = pc.ReadFrom(buf)
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			n, addr, err = pc.ReadFrom(buf)
 
-		if err != nil {
-			errCh <- fmt.Errorf("cannot read from listener: %v\n", err)
-			continue
-		}
+			if err != nil {
+				errCh <- fmt.Errorf("cannot read from listener: %v\n", err)
+				continue
+			}
 
-		messageName, message, err = s.parse(buf[:n])
-		if err != nil {
-			errCh <- fmt.Errorf("cannot parse message body: %v\n", err)
-			continue
-		}
+			messageName, message, err = s.parse(buf[:n])
+			if err != nil {
+				errCh <- fmt.Errorf("cannot parse message body: %v\n", err)
+				continue
+			}
 
-		resCh <- instance.Message{
-			Name:    messageName,
-			Content: message,
-			Ip:      net.ParseIP(strings.Split(addr.String(), ":")[0]),
+			resCh <- instance.Message{
+				Name:    messageName,
+				Content: message,
+				Ip:      net.ParseIP(strings.Split(addr.String(), ":")[0]),
+			}
 		}
 	}
 }
