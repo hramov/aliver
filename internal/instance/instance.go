@@ -19,8 +19,6 @@ type HttpClient interface {
 type Server interface {
 	ServeTCP(ctx context.Context, resCh chan<- Message, errCh chan<- error)
 	ServeUDP(ctx context.Context, resCh chan<- Message, errCh chan<- error)
-	GetUDPPort() int
-	GetTCPPort() int
 }
 
 type Message struct {
@@ -34,6 +32,7 @@ type Instance struct {
 	clusterID     string
 	instanceID    int
 	ip            net.IP
+	tcpPort       int
 	conn          net.Conn
 	mode          string
 	weight        int
@@ -65,7 +64,7 @@ type Instance struct {
 var InstanceTable = make(map[int]*Instance)
 
 func New(
-	clusterId string, id int, ip net.IP, mode string, weight int,
+	clusterId string, id int, ip net.IP, tcpPort int, mode string, weight int,
 	checkScript string, checkInterval time.Duration, checkRetries int, checkTimeout time.Duration,
 	runScript string, runTimeout time.Duration,
 	stopScript string, stopTimeout time.Duration,
@@ -77,6 +76,7 @@ func New(
 		clusterID:     clusterId,
 		instanceID:    id,
 		ip:            ip,
+		tcpPort:       tcpPort,
 		mode:          mode,
 		weight:        weight,
 		currentWeight: weight,
@@ -191,26 +191,20 @@ func (i *Instance) handle(ctx context.Context, msg Message) {
 
 func (i *Instance) handleIAMMessage(ctx context.Context, msg IAM, conn net.Conn) {
 	var err error
-
 	if _, ok := InstanceTable[msg.InstanceID]; !ok {
-
 		log.Printf("found new instance: %s (self: %s)\n", msg.Ip, i.ip.String())
-
 		if conn == nil {
 			// from UDP
-			conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", msg.Ip.String(), i.server.GetTCPPort()))
+			conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", msg.Ip.String(), i.tcpPort))
 			if err != nil {
 				log.Printf("cannot dial tcp: %v\n", err)
 			}
-
 			err = i.client.SendIAM(ctx, i.instanceID, i.ip, conn)
 			if err != nil {
 				log.Printf("cannot send IAM message: %v\n", err)
 			}
 		}
-
 		log.Printf("connected to new instance: %s\n", msg.Ip)
-
 		InstanceTable[msg.InstanceID] = &Instance{
 			clusterID:  i.clusterID,
 			instanceID: msg.InstanceID,

@@ -48,6 +48,7 @@ func main() {
 		cfg.App.ClusterID,
 		cfg.App.InstanceID,
 		cfg.App.Ip,
+		cfg.App.PortTCP,
 		cfg.App.Mode,
 		cfg.App.Weight,
 		cfg.App.CheckScript,

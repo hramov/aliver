@@ -44,14 +44,6 @@ func NewServer(instanceId int, ip net.IP, mask net.IPMask, broadcast net.IP, por
 	}
 }
 
-func (s *Server) GetUDPPort() int {
-	return s.portUdp
-}
-
-func (s *Server) GetTCPPort() int {
-	return s.portTcp
-}
-
 func (s *Server) ServeTCP(ctx context.Context, resCh chan<- instance.Message, errCh chan<- error) {
 	var ln net.Listener
 	var conn net.Conn
