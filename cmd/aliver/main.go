@@ -51,6 +51,7 @@ func main() {
 		cfg.App.PortTCP,
 		cfg.App.Mode,
 		cfg.App.Weight,
+		cfg.App.Timeout,
 		cfg.App.CheckScript,
 		cfg.App.CheckInterval,
 		cfg.App.CheckRetries,

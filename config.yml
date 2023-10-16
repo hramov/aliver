@@ -6,7 +6,7 @@ app:
   port_udp: 6224
   mode: 'master'
   weight: 10
-  timeout: '10s'
+  timeout: '5s'
 
   check_script: 'scripts/check.sh'
   check_interval: '5s'

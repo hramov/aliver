@@ -29,13 +29,17 @@ type Message struct {
 }
 
 type Instance struct {
-	clusterID     string
-	instanceID    int
-	ip            net.IP
-	tcpPort       int
-	conn          net.Conn
-	mode          string
-	weight        int
+	clusterID  string
+	instanceID int
+	ip         net.IP
+	tcpPort    int
+	conn       net.Conn
+	mode       string
+	weight     int
+	timeout    time.Duration
+
+	leaderChosen bool
+
 	currentWeight int
 	lastActive    time.Time
 
@@ -61,10 +65,10 @@ type Instance struct {
 	server  Server
 }
 
-var InstanceTable = make(map[int]*Instance)
+var Table = make(map[int]*Instance)
 
 func New(
-	clusterId string, id int, ip net.IP, tcpPort int, mode string, weight int,
+	clusterId string, id int, ip net.IP, tcpPort int, mode string, weight int, timeout time.Duration,
 	checkScript string, checkInterval time.Duration, checkRetries int, checkTimeout time.Duration,
 	runScript string, runTimeout time.Duration,
 	stopScript string, stopTimeout time.Duration,
@@ -80,6 +84,7 @@ func New(
 		mode:          mode,
 		weight:        weight,
 		currentWeight: weight,
+		timeout:       timeout,
 
 		checkScript:   checkScript,
 		checkInterval: checkInterval,
@@ -101,7 +106,7 @@ func New(
 		server:      server,
 	}
 
-	InstanceTable[id] = inst
+	Table[id] = inst
 
 	return inst, nil
 }
@@ -109,10 +114,10 @@ func New(
 func (i *Instance) Start(ctx context.Context) {
 	go i.server.ServeTCP(ctx, i.resCh, i.errCh)
 	go i.server.ServeUDP(ctx, i.resCh, i.errCh)
+	go i.checkService()
+	go i.handleMessages(ctx)
 
-	go i.check()
-
-	go i.Handle(ctx)
+	taCh := time.After(3 * i.timeout)
 
 	for {
 		select {
@@ -121,7 +126,10 @@ func (i *Instance) Start(ctx context.Context) {
 			return
 		case e := <-i.errCh:
 			log.Println(e)
-			break
+		case <-taCh:
+			if !i.leaderChosen {
+				i.chooseLeader(ctx)
+			}
 		case c := <-i.checkCh:
 			if !c {
 				i.currentWeight = InstanceOff
@@ -146,7 +154,7 @@ func (i *Instance) Start(ctx context.Context) {
 	}
 }
 
-func (i *Instance) Handle(ctx context.Context) {
+func (i *Instance) handleMessages(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -165,11 +173,9 @@ func (i *Instance) handle(ctx context.Context, msg Message) {
 			InstanceID: int(messageMap["instance_id"].(float64)),
 			Ip:         msg.Ip,
 		}
-
 		if message.InstanceID == i.instanceID {
 			return
 		}
-
 		i.handleIAMMessage(ctx, message, msg.Conn)
 		break
 	case CFGMessage:
@@ -191,7 +197,7 @@ func (i *Instance) handle(ctx context.Context, msg Message) {
 
 func (i *Instance) handleIAMMessage(ctx context.Context, msg IAM, conn net.Conn) {
 	var err error
-	if _, ok := InstanceTable[msg.InstanceID]; !ok {
+	if _, ok := Table[msg.InstanceID]; !ok {
 		log.Printf("found new instance: %s (self: %s)\n", msg.Ip, i.ip.String())
 		if conn == nil {
 			// from UDP
@@ -205,7 +211,7 @@ func (i *Instance) handleIAMMessage(ctx context.Context, msg IAM, conn net.Conn)
 			}
 		}
 		log.Printf("connected to new instance: %s\n", msg.Ip)
-		InstanceTable[msg.InstanceID] = &Instance{
+		Table[msg.InstanceID] = &Instance{
 			clusterID:  i.clusterID,
 			instanceID: msg.InstanceID,
 			ip:         msg.Ip,
@@ -215,7 +221,7 @@ func (i *Instance) handleIAMMessage(ctx context.Context, msg IAM, conn net.Conn)
 			lastActive: time.Now(),
 		}
 	} else {
-		InstanceTable[msg.InstanceID].lastActive = time.Now()
+		Table[msg.InstanceID].lastActive = time.Now()
 	}
 }
 
@@ -231,13 +237,22 @@ func (i *Instance) handleELCMessage(msg ELC) {
 
 }
 
+func (i *Instance) chooseLeader(ctx context.Context) {
+	for _, v := range Table {
+		err := i.client.SendCFG(ctx, v.instanceID, LEADER, i.currentWeight, v.conn)
+		if err != nil {
+			log.Printf("cannot send CFG message to %v: %v\n", v.conn.RemoteAddr(), err)
+		}
+	}
+}
+
 func (i *Instance) checkInstances(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			for _, inst := range InstanceTable {
+			for _, inst := range Table {
 				if time.Since(inst.lastActive) > 3*i.checkTimeout {
 					log.Printf("instance %s is not active\n", inst.ip)
 					if inst.mode == LEADER {
@@ -251,7 +266,7 @@ func (i *Instance) checkInstances(ctx context.Context) {
 	}
 }
 
-func (i *Instance) check() {
+func (i *Instance) checkService() {
 	for {
 		time.Sleep(i.checkInterval)
 		i.checkCh <- true
