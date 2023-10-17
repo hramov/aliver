@@ -42,7 +42,10 @@ func main() {
 		log.Fatalf("cannot instantiate client: %v\n", err)
 	}
 
-	server := v1.NewServer(cfg.App.InstanceID, cfg.App.Ip, cfg.App.Mask, cfg.App.Broadcast, cfg.App.PortTCP, cfg.App.PortUDP, cfg.App.Timeout)
+	server, err := v1.NewServer(cfg.App.InstanceID, cfg.App.Ip, cfg.App.Mask, cfg.App.Broadcast, cfg.App.PortTCP, cfg.App.PortUDP, cfg.App.Timeout)
+	if err != nil {
+		log.Fatalf("cannot instantiate server: %v\n", err)
+	}
 
 	aliverInstance, err := instance.New(
 		cfg.App.ClusterID,

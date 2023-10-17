@@ -17,13 +17,15 @@ const (
 )
 
 type Server struct {
-	instanceId int
-	ip         net.IP
-	mask       net.IPMask
-	portTcp    int
-	portUdp    int
-	broadcast  net.IP
-	timeout    time.Duration
+	instanceId    int
+	ip            net.IP
+	mask          net.IPMask
+	portTcp       int
+	portUdp       int
+	broadcast     net.IP
+	broadcastAddr *net.UDPAddr
+	timeout       time.Duration
+	pc            net.PacketConn
 }
 
 type rawMessageType struct {
@@ -31,17 +33,23 @@ type rawMessageType struct {
 	Content any    `json:"content"`
 }
 
-func NewServer(instanceId int, ip net.IP, mask net.IPMask, broadcast net.IP, portTcp, portUdp int, timeout time.Duration) *Server {
+func NewServer(instanceId int, ip net.IP, mask net.IPMask, broadcast net.IP, portTcp, portUdp int, timeout time.Duration) (*Server, error) {
+	addr, err := net.ResolveUDPAddr(UDP, broadcast.String()+fmt.Sprintf(":%d", portUdp))
+	if err != nil {
+		log.Printf("cannot resolve udp address: %v\n", err)
+		return nil, err
+	}
 
 	return &Server{
-		instanceId: instanceId,
-		ip:         ip.To4(),
-		portTcp:    portTcp,
-		portUdp:    portUdp,
-		mask:       mask,
-		broadcast:  broadcast,
-		timeout:    timeout,
-	}
+		instanceId:    instanceId,
+		ip:            ip.To4(),
+		portTcp:       portTcp,
+		portUdp:       portUdp,
+		mask:          mask,
+		broadcast:     broadcast,
+		broadcastAddr: addr,
+		timeout:       timeout,
+	}, nil
 }
 
 func (s *Server) ServeTCP(ctx context.Context, resCh chan<- instance.Message, errCh chan<- error) {
@@ -110,14 +118,14 @@ func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, er
 		return
 	}
 
+	s.pc = pc
+
 	defer func(pc net.PacketConn) {
 		err = pc.Close()
 		if err != nil {
 			log.Printf("cannot close udp listener: %v\n", err)
 		}
-	}(pc)
-
-	go s.health(ctx, pc)
+	}(s.pc)
 
 	var messageName string
 	var message any
@@ -158,20 +166,7 @@ func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, er
 	}
 }
 
-func (s *Server) parse(body []byte) (string, any, error) {
-	if len(body) == 0 {
-		return "", nil, fmt.Errorf("empty body")
-	}
-
-	message := rawMessageType{}
-	err := json.Unmarshal(body, &message)
-	if err != nil {
-		return "", nil, err
-	}
-	return message.Name, message.Content, nil
-}
-
-func (s *Server) health(ctx context.Context, pc net.PacketConn) {
+func (s *Server) Health(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -193,13 +188,7 @@ func (s *Server) health(ctx context.Context, pc net.PacketConn) {
 				continue
 			}
 
-			addr, err := net.ResolveUDPAddr(UDP, s.broadcast.String()+fmt.Sprintf(":%d", s.portUdp))
-			if err != nil {
-				log.Printf("cannot resolve udp address: %v\n", err)
-				continue
-			}
-
-			_, err = pc.WriteTo(rawMsgBytes, addr)
+			_, err = s.pc.WriteTo(rawMsgBytes, s.broadcastAddr)
 			if err != nil {
 				log.Printf("cannot write to pc: %v\n", err)
 				continue
@@ -208,4 +197,22 @@ func (s *Server) health(ctx context.Context, pc net.PacketConn) {
 		}
 		time.Sleep(s.timeout)
 	}
+}
+
+func (s *Server) SendBroadcast(message []byte) error {
+	_, err := s.pc.WriteTo(message, s.broadcastAddr)
+	return fmt.Errorf("cannot send message: %v\n", err)
+}
+
+func (s *Server) parse(body []byte) (string, any, error) {
+	if len(body) == 0 {
+		return "", nil, fmt.Errorf("empty body")
+	}
+
+	message := rawMessageType{}
+	err := json.Unmarshal(body, &message)
+	if err != nil {
+		return "", nil, err
+	}
+	return message.Name, message.Content, nil
 }

@@ -17,8 +17,8 @@ type HttpClient interface {
 }
 
 type Server interface {
-	ServeTCP(ctx context.Context, resCh chan<- Message, errCh chan<- error)
 	ServeUDP(ctx context.Context, resCh chan<- Message, errCh chan<- error)
+	Health(ctx context.Context)
 }
 
 type Message struct {
@@ -112,8 +112,9 @@ func New(
 }
 
 func (i *Instance) Start(ctx context.Context) {
-	go i.server.ServeTCP(ctx, i.resCh, i.errCh)
 	go i.server.ServeUDP(ctx, i.resCh, i.errCh)
+	go i.server.Health(ctx)
+
 	go i.checkService()
 	go i.handleMessages(ctx)
 
@@ -144,7 +145,6 @@ func (i *Instance) Start(ctx context.Context) {
 						log.Printf("cannot transit fsm: %v\n", err)
 					}
 				}
-
 			} else {
 				i.currentWeight = i.weight
 				if i.currentStep.Id == Undiscovered {
@@ -152,6 +152,10 @@ func (i *Instance) Start(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (i *Instance) Stop() {
+	// logic for correctly exit the process
 }
 
 func (i *Instance) handleMessages(ctx context.Context) {
@@ -271,8 +275,4 @@ func (i *Instance) checkService() {
 		time.Sleep(i.checkInterval)
 		i.checkCh <- true
 	}
-}
-
-func (i *Instance) Stop() {
-	// logic for correctly exit the process
 }
