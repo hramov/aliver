@@ -1,4 +1,4 @@
-package fsm
+package instance
 
 import (
 	"fmt"
@@ -7,6 +7,7 @@ import (
 
 type Step struct {
 	Id                 int
+	Title              string
 	AllowedTransitions []int
 }
 
@@ -18,29 +19,29 @@ type Fsm struct {
 func NewFsm() (*Fsm, *Step) {
 	return &Fsm{
 			Steps: []Step{
-				// undiscovered instance
 				{
 					Id:                 1,
+					Title:              "UNDISCOVERED",
 					AllowedTransitions: []int{2, 3},
 				},
-				// discovered instance
 				{
 					Id:                 2,
+					Title:              "DISCOVERED",
 					AllowedTransitions: []int{3},
 				},
-				// discovered instance while election
 				{
 					Id:                 3,
+					Title:              "ELECTION",
 					AllowedTransitions: []int{4, 5},
 				},
-				// leader
 				{
 					Id:                 4,
+					Title:              "LEADER",
 					AllowedTransitions: []int{1, 2},
 				},
-				// follower
 				{
 					Id:                 5,
+					Title:              "FOLLOWER",
 					AllowedTransitions: []int{3},
 				},
 			},
@@ -51,11 +52,12 @@ func NewFsm() (*Fsm, *Step) {
 		}
 }
 
-func (f *Fsm) Transit(currentStep *Step, newStepId int) (int, error) {
+func (f *Fsm) Transit(currentStep *Step, newStepId int) error {
 	if slices.Contains(currentStep.AllowedTransitions, newStepId) {
 		newStep := f.Steps[newStepId-1]
 		f.Transitions[currentStep.Id] = newStep
-		return newStep.Id, nil
+		*currentStep = newStep
+		return nil
 	}
-	return 0, fmt.Errorf("invalid transition: %d -> %d", currentStep.Id, newStepId)
+	return fmt.Errorf("invalid transition: %d -> %d", currentStep.Id, newStepId)
 }

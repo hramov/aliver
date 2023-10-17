@@ -13,7 +13,6 @@ import (
 
 const (
 	UDP = "udp4"
-	TCP = "tcp"
 )
 
 type Server struct {
@@ -52,65 +51,6 @@ func NewServer(instanceId int, ip net.IP, mask net.IPMask, broadcast net.IP, por
 	}, nil
 }
 
-func (s *Server) ServeTCP(ctx context.Context, resCh chan<- instance.Message, errCh chan<- error) {
-	var ln net.Listener
-	var conn net.Conn
-	var err error
-
-	ln, err = net.Listen(TCP, fmt.Sprintf(":%d", s.portTcp))
-	if err != nil {
-		errCh <- fmt.Errorf("cannot listen tcp, returning: %v\n", err)
-		return
-	}
-
-	log.Printf("TCP server started on %d\n", s.portTcp)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			conn, err = ln.Accept()
-			if err != nil {
-				errCh <- err
-				return
-			}
-
-			var buf []byte
-
-			_, err = conn.Read(buf)
-			if err != nil {
-				errCh <- fmt.Errorf("cannot read from listener: %v\n", err)
-				continue
-			}
-
-			var messageName string
-			var rawMessage any
-
-			messageName, rawMessage, err = s.parse(buf)
-			if err != nil {
-				errCh <- fmt.Errorf("cannot parse message body: %v", err)
-				continue
-			}
-
-			if messageName == instance.IAMMessage {
-				resCh <- instance.Message{
-					Name:    messageName,
-					Content: rawMessage,
-					Conn:    conn,
-				}
-			} else {
-				resCh <- instance.Message{
-					Name:    messageName,
-					Content: rawMessage,
-				}
-			}
-		}
-
-	}
-
-}
-
 func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, errCh chan<- error) {
 	pc, err := net.ListenPacket(UDP, fmt.Sprintf(":%d", s.portUdp))
 	if err != nil {
@@ -147,10 +87,6 @@ func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, er
 				continue
 			}
 
-			if n == 0 {
-				continue
-			}
-
 			messageName, message, err = s.parse(buf[:n])
 			if err != nil {
 				errCh <- fmt.Errorf("cannot parse message body: %v\n", err)
@@ -166,8 +102,12 @@ func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, er
 	}
 }
 
-func (s *Server) Health(ctx context.Context) {
+func (s *Server) Health(ctx context.Context, errCh chan<- error) {
 	for {
+		if s.pc == nil {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -177,21 +117,9 @@ func (s *Server) Health(ctx context.Context) {
 				Ip:         s.ip,
 			}
 
-			rawMsg := rawMessageType{
-				Name:    instance.IAMMessage,
-				Content: message,
-			}
-
-			rawMsgBytes, err := json.Marshal(rawMsg)
+			err := s.SendBroadcast(instance.IAMMessage, message)
 			if err != nil {
-				log.Printf("cannot marshal raw message: %v\n", err)
-				continue
-			}
-
-			_, err = s.pc.WriteTo(rawMsgBytes, s.broadcastAddr)
-			if err != nil {
-				log.Printf("cannot write to pc: %v\n", err)
-				continue
+				errCh <- fmt.Errorf("cannot send message: %v\n", err)
 			}
 
 		}
@@ -199,9 +127,24 @@ func (s *Server) Health(ctx context.Context) {
 	}
 }
 
-func (s *Server) SendBroadcast(message []byte) error {
-	_, err := s.pc.WriteTo(message, s.broadcastAddr)
-	return fmt.Errorf("cannot send message: %v\n", err)
+func (s *Server) SendBroadcast(name string, content any) error {
+	message := rawMessageType{
+		Name:    name,
+		Content: content,
+	}
+	rawMsgBytes, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("cannot marshal raw message: %v\n", err)
+		return fmt.Errorf("cannot marshal raw message: %v\n", err)
+	}
+
+	_, err = s.pc.WriteTo(rawMsgBytes, s.broadcastAddr)
+	if err != nil {
+		log.Printf("cannot write to pc: %v\n", err)
+		return fmt.Errorf("cannot write to pc: %v\n", err)
+	}
+
+	return nil
 }
 
 func (s *Server) parse(body []byte) (string, any, error) {

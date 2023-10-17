@@ -4,3 +4,4 @@ deploy
 Dockerfile
 docker-compose.yml
 config2.yml
+config3.yml

@@ -4,7 +4,6 @@ import (
 	"context"
 	v1 "github.com/hramov/aliver/internal/adapter/v1"
 	"github.com/hramov/aliver/internal/config"
-	"github.com/hramov/aliver/internal/fsm"
 	"github.com/hramov/aliver/internal/instance"
 	"github.com/joho/godotenv"
 	"log"
@@ -35,37 +34,31 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(appCtx, os.Interrupt, os.Kill)
 
-	finiteStateMachine, currentStep := fsm.NewFsm()
+	finiteStateMachine, currentStep := instance.NewFsm()
 
-	client, err := v1.NewClient()
-	if err != nil {
-		log.Fatalf("cannot instantiate client: %v\n", err)
-	}
-
-	server, err := v1.NewServer(cfg.App.InstanceID, cfg.App.Ip, cfg.App.Mask, cfg.App.Broadcast, cfg.App.PortTCP, cfg.App.PortUDP, cfg.App.Timeout)
+	server, err := v1.NewServer(cfg.InstanceID, cfg.Ip, cfg.Mask, cfg.Broadcast, cfg.PortTCP, cfg.PortUDP, cfg.Timeout)
 	if err != nil {
 		log.Fatalf("cannot instantiate server: %v\n", err)
 	}
 
 	aliverInstance, err := instance.New(
-		cfg.App.ClusterID,
-		cfg.App.InstanceID,
-		cfg.App.Ip,
-		cfg.App.PortTCP,
-		cfg.App.Mode,
-		cfg.App.Weight,
-		cfg.App.Timeout,
-		cfg.App.CheckScript,
-		cfg.App.CheckInterval,
-		cfg.App.CheckRetries,
-		cfg.App.CheckTimeout,
-		cfg.App.RunScript,
-		cfg.App.RunTimeout,
-		cfg.App.StopScript,
-		cfg.App.StopTimeout,
+		cfg.ClusterID,
+		cfg.InstanceID,
+		cfg.Ip,
+		cfg.PortTCP,
+		cfg.Mode,
+		cfg.Weight,
+		cfg.Timeout,
+		cfg.CheckScript,
+		cfg.CheckInterval,
+		cfg.CheckRetries,
+		cfg.CheckTimeout,
+		cfg.RunScript,
+		cfg.RunTimeout,
+		cfg.StopScript,
+		cfg.StopTimeout,
 		finiteStateMachine,
 		currentStep,
-		client,
 		server)
 	if err != nil {
 		log.Fatalf("cannot get instance: %v\n", err)

@@ -2,30 +2,30 @@ package instance
 
 import (
 	"context"
-	"fmt"
-	"github.com/hramov/aliver/internal/fsm"
 	"log"
 	"net"
 	"time"
 )
 
-type HttpClient interface {
-	SendIAM(ctx context.Context, instanceID int, ip net.IP, conn net.Conn) error
-	SendAck(ctx context.Context, instanceID int, mode string, conn net.Conn) error
-	SendCFG(ctx context.Context, instanceID int, mode string, weight int, conn net.Conn) error
-	SendELC(ctx context.Context, instanceID int, weight int, conn net.Conn) error
-}
-
 type Server interface {
 	ServeUDP(ctx context.Context, resCh chan<- Message, errCh chan<- error)
-	Health(ctx context.Context)
+	Health(ctx context.Context, errCh chan<- error)
+	SendBroadcast(name string, message any) error
 }
 
 type Message struct {
 	Name    string
 	Content any
 	Ip      net.IP
-	Conn    net.Conn
+}
+
+type TableInstance struct {
+	clusterID  string
+	instanceID int
+	ip         net.IP
+	mode       string
+	weight     int
+	lastActive time.Time
 }
 
 type Instance struct {
@@ -33,7 +33,6 @@ type Instance struct {
 	instanceID int
 	ip         net.IP
 	tcpPort    int
-	conn       net.Conn
 	mode       string
 	weight     int
 	timeout    time.Duration
@@ -54,9 +53,8 @@ type Instance struct {
 	stopScript  string
 	stopTimeout time.Duration
 
-	fsm         *fsm.Fsm
-	currentStep *fsm.Step
-	client      HttpClient
+	state       *Fsm
+	currentStep *Step
 
 	resCh   chan Message
 	cmdCh   chan string
@@ -65,15 +63,14 @@ type Instance struct {
 	server  Server
 }
 
-var Table = make(map[int]*Instance)
+var Table = make(map[int]*TableInstance)
 
 func New(
 	clusterId string, id int, ip net.IP, tcpPort int, mode string, weight int, timeout time.Duration,
 	checkScript string, checkInterval time.Duration, checkRetries int, checkTimeout time.Duration,
 	runScript string, runTimeout time.Duration,
 	stopScript string, stopTimeout time.Duration,
-	fsm *fsm.Fsm, currentStep *fsm.Step,
-	client HttpClient,
+	fsm *Fsm, currentStep *Step,
 	server Server,
 ) (*Instance, error) {
 	inst := &Instance{
@@ -96,27 +93,32 @@ func New(
 		stopScript:  stopScript,
 		stopTimeout: stopTimeout,
 
-		fsm:         fsm,
+		state:       fsm,
 		currentStep: currentStep,
-		client:      client,
-		resCh:       make(chan Message),
+		resCh:       make(chan Message, 5),
 		cmdCh:       make(chan string),
 		checkCh:     make(chan bool),
 		errCh:       make(chan error),
 		server:      server,
 	}
 
-	Table[id] = inst
+	Table[id] = &TableInstance{
+		clusterID:  clusterId,
+		instanceID: id,
+		ip:         ip,
+		mode:       mode,
+		weight:     weight,
+		lastActive: time.Now(),
+	}
 
 	return inst, nil
 }
 
 func (i *Instance) Start(ctx context.Context) {
 	go i.server.ServeUDP(ctx, i.resCh, i.errCh)
-	go i.server.Health(ctx)
-
-	go i.checkService()
 	go i.handleMessages(ctx)
+	go i.checkService()
+	go i.server.Health(ctx, i.errCh)
 
 	taCh := time.After(3 * i.timeout)
 
@@ -130,25 +132,6 @@ func (i *Instance) Start(ctx context.Context) {
 		case <-taCh:
 			if !i.leaderChosen {
 				i.chooseLeader(ctx)
-			}
-		case c := <-i.checkCh:
-			if !c {
-				i.currentWeight = InstanceOff
-				if i.currentStep.Id == Leader {
-					err := i.client.SendELC(ctx, i.instanceID, i.currentWeight, nil)
-					if err != nil {
-						log.Printf("cannot send message: %v\n", err)
-					}
-
-					_, err = i.fsm.Transit(i.currentStep, 2)
-					if err != nil {
-						log.Printf("cannot transit fsm: %v\n", err)
-					}
-				}
-			} else {
-				i.currentWeight = i.weight
-				if i.currentStep.Id == Undiscovered {
-				}
 			}
 		}
 	}
@@ -180,15 +163,23 @@ func (i *Instance) handle(ctx context.Context, msg Message) {
 		if message.InstanceID == i.instanceID {
 			return
 		}
-		i.handleIAMMessage(ctx, message, msg.Conn)
+		i.handleIAMMessage(ctx, message)
+		break
+	case ACKMessage:
+		messageMap := msg.Content.(map[string]any)
+		message := ACK{
+			InstanceID:       int(messageMap["instance_id"].(float64)),
+			RemoteInstanceID: int(messageMap["remote_instance_id"].(float64)),
+			Ip:               msg.Ip,
+		}
+		if message.RemoteInstanceID == message.InstanceID {
+			return
+		}
+		i.handleACKMessage(ctx, message)
 		break
 	case CFGMessage:
 		message := msg.Content.(CFG)
 		i.handleCFGMessage(message)
-		break
-	case ACKMessage:
-		message := msg.Content.(ACK)
-		i.handleACKMessage(message)
 		break
 	case ELCMessage:
 		message := msg.Content.(ELC)
@@ -199,27 +190,49 @@ func (i *Instance) handle(ctx context.Context, msg Message) {
 	}
 }
 
-func (i *Instance) handleIAMMessage(ctx context.Context, msg IAM, conn net.Conn) {
+func (i *Instance) handleIAMMessage(ctx context.Context, msg IAM) {
 	var err error
 	if _, ok := Table[msg.InstanceID]; !ok {
-		log.Printf("found new instance: %s (self: %s)\n", msg.Ip, i.ip.String())
-		if conn == nil {
-			// from UDP
-			conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", msg.Ip.String(), i.tcpPort))
-			if err != nil {
-				log.Printf("cannot dial tcp: %v\n", err)
-			}
-			err = i.client.SendIAM(ctx, i.instanceID, i.ip, conn)
-			if err != nil {
-				log.Printf("cannot send IAM message: %v\n", err)
-			}
-		}
-		log.Printf("connected to new instance: %s\n", msg.Ip)
-		Table[msg.InstanceID] = &Instance{
+		Table[msg.InstanceID] = &TableInstance{
 			clusterID:  i.clusterID,
 			instanceID: msg.InstanceID,
 			ip:         msg.Ip,
-			conn:       conn,
+			mode:       UNKNOWN,
+			weight:     0,
+			lastActive: time.Now(),
+		}
+	} else {
+		Table[msg.InstanceID].lastActive = time.Now()
+	}
+
+	reply := ACK{
+		InstanceID:       i.instanceID,
+		RemoteInstanceID: msg.InstanceID,
+		Ip:               i.ip,
+	}
+
+	err = i.server.SendBroadcast(ACKMessage, reply)
+	if err != nil {
+		log.Printf("cannot send message: %v\n", err)
+		return
+	}
+}
+
+func (i *Instance) handleACKMessage(ctx context.Context, msg ACK) {
+	if i.currentStep.Id == Undiscovered {
+		err := i.state.Transit(i.currentStep, Discovered)
+		if err != nil {
+			log.Printf("cannot transit: %v\n", err)
+			return
+		}
+		log.Printf("change status to %s\n", i.currentStep.Title)
+	}
+
+	if _, ok := Table[msg.InstanceID]; !ok {
+		Table[msg.InstanceID] = &TableInstance{
+			clusterID:  i.clusterID,
+			instanceID: msg.InstanceID,
+			ip:         msg.Ip,
 			mode:       UNKNOWN,
 			weight:     0,
 			lastActive: time.Now(),
@@ -233,21 +246,17 @@ func (i *Instance) handleCFGMessage(msg CFG) {
 
 }
 
-func (i *Instance) handleACKMessage(msg ACK) {
-
-}
-
 func (i *Instance) handleELCMessage(msg ELC) {
 
 }
 
 func (i *Instance) chooseLeader(ctx context.Context) {
-	for _, v := range Table {
-		err := i.client.SendCFG(ctx, v.instanceID, LEADER, i.currentWeight, v.conn)
-		if err != nil {
-			log.Printf("cannot send CFG message to %v: %v\n", v.conn.RemoteAddr(), err)
-		}
-	}
+	//for _, v := range Table {
+	//	err := i.client.SendCFG(ctx, v.instanceID, LEADER, i.currentWeight, v.conn)
+	//	if err != nil {
+	//		log.Printf("cannot send CFG message to %v: %v\n", v.conn.RemoteAddr(), err)
+	//	}
+	//}
 }
 
 func (i *Instance) checkInstances(ctx context.Context) {

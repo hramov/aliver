@@ -1,20 +1,19 @@
-app:
-  cluster_id: 'cluster'
-  instance_id: 1
-  interface: 'eth0'
-  port_tcp: 6223
-  port_udp: 6224
-  mode: 'master'
-  weight: 10
-  timeout: '5s'
+cluster_id: 'cluster'
+instance_id: 1
+interface: 'eth0'
+port_tcp: 6223
+port_udp: 6224
+mode: 'master'
+weight: 10
+timeout: '5s'
 
-  check_script: 'scripts/check.sh'
-  check_interval: '5s'
-  check_retries: 5
-  check_timeout: '10s'
+check_script: 'scripts/check.sh'
+check_interval: '5s'
+check_retries: 5
+check_timeout: '10s'
 
-  run_script: 'scripts/run.sh'
-  run_timeout: '10s'
+run_script: 'scripts/run.sh'
+run_timeout: '10s'
 
-  stop_script: 'scripts/stop.sh'
-  stop_timeout: '10s'
+stop_script: 'scripts/stop.sh'
+stop_timeout: '10s'

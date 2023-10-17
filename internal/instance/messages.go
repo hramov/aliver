@@ -36,8 +36,9 @@ type CFG struct {
 }
 
 type ACK struct {
-	InstanceID int    `json:"instance_id"`
-	Mode       string `json:"mode"`
+	InstanceID       int    `json:"instance_id"`
+	Ip               net.IP `json:"ip"`
+	RemoteInstanceID int    `json:"remote_instance_id"`
 }
 
 type ELC struct {

@@ -10,7 +10,7 @@ import (
 
 const AppVersion = "0.0.1"
 
-type App struct {
+type Config struct {
 	Version string
 
 	ClusterID  string `yaml:"cluster_id"`
@@ -37,10 +37,6 @@ type App struct {
 	StopTimeout time.Duration `yaml:"stop_timeout"`
 }
 
-type Config struct {
-	App *App
-}
-
 func LoadConfig(configPath string, cfg *Config) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -48,28 +44,28 @@ func LoadConfig(configPath string, cfg *Config) error {
 	}
 	err = yaml.Unmarshal(data, cfg)
 
-	cfg.App.Version = AppVersion
+	cfg.Version = AppVersion
 
 	ifaces, _ := net.Interfaces()
 	var ip net.IP
 	var mask net.IPMask
 
 	for _, i := range ifaces {
-		if i.Name == cfg.App.Interface {
+		if i.Name == cfg.Interface {
 			addrs, _ := i.Addrs()
 
 			if len(addrs) == 0 {
-				return fmt.Errorf("interface %s has no IP addresses", cfg.App.Interface)
+				return fmt.Errorf("interface %s has no IP addresses", cfg.Interface)
 			}
 
-			if len(addrs) > 1 && cfg.App.Ip == nil {
-				return fmt.Errorf("interface %s has multiple IP addresses and no IP address was specified", cfg.App.Interface)
+			if len(addrs) > 1 && cfg.Ip == nil {
+				return fmt.Errorf("interface %s has multiple IP addresses and no IP address was specified", cfg.Interface)
 			}
 
-			if len(addrs) > 1 && cfg.App.Ip != nil {
+			if len(addrs) > 1 && cfg.Ip != nil {
 				for _, addr := range addrs {
 					v := addr.(*net.IPNet)
-					if v.IP.String() == cfg.App.Ip.String() {
+					if v.IP.String() == cfg.Ip.String() {
 						ip = v.IP
 						mask = v.Mask
 					}
@@ -85,7 +81,7 @@ func LoadConfig(configPath string, cfg *Config) error {
 	}
 
 	if ip == nil || mask == nil {
-		return fmt.Errorf("ip address or mask is nil on interface %s\n", cfg.App.Interface)
+		return fmt.Errorf("ip address or mask is nil on interface %s\n", cfg.Interface)
 	}
 
 	broadcast := net.ParseIP("0.0.0.0").To4()
@@ -96,9 +92,9 @@ func LoadConfig(configPath string, cfg *Config) error {
 		broadcast[i] = ip[i] | ^mask[i]
 	}
 
-	cfg.App.Ip = ip
-	cfg.App.Mask = mask
-	cfg.App.Broadcast = broadcast
+	cfg.Ip = ip
+	cfg.Mask = mask
+	cfg.Broadcast = broadcast
 
 	return err
 }
