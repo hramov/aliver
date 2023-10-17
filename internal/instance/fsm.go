@@ -20,35 +20,46 @@ func NewFsm() (*Fsm, *Step) {
 	return &Fsm{
 			Steps: []Step{
 				{
-					Id:                 1,
+					Id:                 Off,
+					Title:              "INSTANCE OFF",
+					AllowedTransitions: []int{Undiscovered},
+				},
+				{
+					Id:                 Undiscovered,
 					Title:              "UNDISCOVERED",
-					AllowedTransitions: []int{2, 3},
+					AllowedTransitions: []int{Discovered},
 				},
 				{
-					Id:                 2,
+					Id:                 Discovered,
 					Title:              "DISCOVERED",
-					AllowedTransitions: []int{3},
+					AllowedTransitions: []int{Election, Follower},
 				},
 				{
-					Id:                 3,
+					Id:                 Election,
 					Title:              "ELECTION",
-					AllowedTransitions: []int{4, 5},
+					AllowedTransitions: []int{PreLeader, Follower},
 				},
 				{
-					Id:                 4,
+					Id:                 PreLeader,
+					Title:              "PRELEADER",
+					AllowedTransitions: []int{Leader, Follower},
+				},
+				{
+					Id:                 Leader,
 					Title:              "LEADER",
-					AllowedTransitions: []int{1, 2},
+					AllowedTransitions: []int{Off, Election},
 				},
 				{
-					Id:                 5,
+					Id:                 Follower,
 					Title:              "FOLLOWER",
-					AllowedTransitions: []int{3},
+					AllowedTransitions: []int{Off, Election},
 				},
 			},
 			Transitions: map[int]Step{},
 		}, &Step{
-			Id:                 1,
-			AllowedTransitions: []int{2, 3},
+			Id:                 Undiscovered,
+			Title:              "UNDISCOVERED",
+			AllowedTransitions: []int{Discovered},
 		}
 }
 
