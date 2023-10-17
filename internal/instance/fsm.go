@@ -40,6 +40,11 @@ func NewFsm() (*Fsm, *Step) {
 					AllowedTransitions: []int{PreLeader, Follower},
 				},
 				{
+					Id:                 Follower,
+					Title:              "FOLLOWER",
+					AllowedTransitions: []int{Off, Election},
+				},
+				{
 					Id:                 PreLeader,
 					Title:              "PRELEADER",
 					AllowedTransitions: []int{Leader, Follower},
@@ -47,11 +52,6 @@ func NewFsm() (*Fsm, *Step) {
 				{
 					Id:                 Leader,
 					Title:              "LEADER",
-					AllowedTransitions: []int{Off, Election},
-				},
-				{
-					Id:                 Follower,
-					Title:              "FOLLOWER",
 					AllowedTransitions: []int{Off, Election},
 				},
 			},
@@ -65,7 +65,7 @@ func NewFsm() (*Fsm, *Step) {
 
 func (f *Fsm) Transit(currentStep *Step, newStepId int) error {
 	if slices.Contains(currentStep.AllowedTransitions, newStepId) {
-		newStep := f.Steps[newStepId-1]
+		newStep := f.Steps[newStepId]
 		f.Transitions[currentStep.Id] = newStep
 		*currentStep = newStep
 		return nil

@@ -15,7 +15,7 @@ app:
   port_tcp: 6223 // must be equal to all of the servers in cluster
   port_udp: 6224 // must be equal to all of the servers in cluster
   
-  mode: 'master' // [ follower ] - initial state for machine
+  mode: 'leader' // [ follower ] - initial state for machine
   weight: 10 // probability of choosing to be the leader
   
   timeout: '10s' // timeout for checking the servers in cluster

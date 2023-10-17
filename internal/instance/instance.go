@@ -63,10 +63,9 @@ type Instance struct {
 	errCh   chan error
 	server  Server
 
-	quorum                int
-	currentQuorum         int
-	currentElectionStepId int
-	votes                 int
+	quorum        int
+	currentQuorum int
+	votes         int
 }
 
 var Table = make(map[int]*TableInstance)
@@ -106,6 +105,8 @@ func New(
 		checkCh:     make(chan bool),
 		errCh:       make(chan error),
 		server:      server,
+
+		quorum: 1,
 	}
 
 	Table[id] = &TableInstance{
@@ -197,7 +198,7 @@ func (i *Instance) handle(ctx context.Context, msg Message) {
 		messageMap := msg.Content.(map[string]any)
 		message := CFG{
 			InstanceID: int(messageMap["instance_id"].(float64)),
-			Mode:       messageMap["instance_id"].(string),
+			Mode:       messageMap["mode"].(string),
 			Weight:     int(messageMap["instance_id"].(float64)),
 		}
 		if message.InstanceID == i.instanceID {
@@ -210,9 +211,6 @@ func (i *Instance) handle(ctx context.Context, msg Message) {
 		message := CFGACK{
 			InstanceID:       int(messageMap["instance_id"].(float64)),
 			ChosenInstanceID: int(messageMap["chosen_instance_id"].(float64)),
-		}
-		if message.InstanceID == i.instanceID {
-			return
 		}
 		i.handleCFGACKMessage(ctx, message)
 		break
@@ -287,6 +285,10 @@ func (i *Instance) handleACKMessage(ctx context.Context, msg ACK) {
 }
 
 func (i *Instance) handleELCMessage(ctx context.Context, msg ELC) {
+	if i.currentStep.Id >= Election {
+		return
+	}
+
 	i.currentQuorum = 0
 
 	err := i.state.Transit(i.currentStep, Election)
@@ -310,36 +312,50 @@ func (i *Instance) handleELCMessage(ctx context.Context, msg ELC) {
 }
 
 func (i *Instance) handleCFGMessage(ctx context.Context, msg CFG) {
+	if i.currentStep.Id < Election {
+		return
+	}
+
 	cfgAckMessage := &CFGACK{
 		InstanceID: i.instanceID,
 	}
 
-	if msg.Mode == LEADER && i.mode != msg.Mode {
-		i.currentElectionStepId = Follower
+	if msg.Mode == LEADER && i.mode != msg.Mode && i.currentStep.Id < Follower {
 		cfgAckMessage.ChosenInstanceID = msg.InstanceID
 		err := i.state.Transit(i.currentStep, Follower)
 		if err != nil {
 			log.Printf("cannot transit to follower: %v\n", err)
 			return
 		}
+		i.leaderChosen = true
 		log.Printf("change status to %s\n", i.currentStep.Title)
-	} else if msg.Mode == i.mode && i.currentStep.Id != Follower {
+	} else if msg.Mode == FOLLOWER && i.mode != msg.Mode {
+		cfgAckMessage.ChosenInstanceID = i.instanceID
+		if i.currentStep.Id < PreLeader {
+			err := i.state.Transit(i.currentStep, PreLeader)
+			if err != nil {
+				log.Printf("cannot transit to PreLeader: %v\n", err)
+				return
+			}
+			log.Printf("change status to %s\n", i.currentStep.Title)
+		}
+	} else if msg.Mode == i.mode {
 		cfgAckMessage.ChosenInstanceID = i.checkWeight(msg)
-		if cfgAckMessage.ChosenInstanceID == i.instanceID {
+		if cfgAckMessage.ChosenInstanceID == i.instanceID && i.currentStep.Id < PreLeader {
 			err := i.state.Transit(i.currentStep, PreLeader)
 			if err != nil {
 				log.Printf("cannot transit to preleader: %v\n", err)
 				return
 			}
 			log.Printf("change status to %s\n", i.currentStep.Title)
-		} else {
-			i.currentElectionStepId = Follower
+		} else if i.currentStep.Id < Follower {
 			err := i.state.Transit(i.currentStep, Follower)
 			if err != nil {
 				log.Printf("cannot transit to follower: %v\n", err)
 				return
 			}
 			log.Printf("change status to %s\n", i.currentStep.Title)
+			i.leaderChosen = true
 		}
 	}
 
@@ -365,7 +381,7 @@ func (i *Instance) handleCFGACKMessage(ctx context.Context, msg CFGACK) {
 		if i.votes >= i.quorum/2+1 {
 			err := i.state.Transit(i.currentStep, Leader)
 			if err != nil {
-				log.Printf("cannot transit to leader: %v\n", err)
+				log.Printf("cannot transit to leader (handleCFGACKMessage): %v\n", err)
 				return
 			}
 			log.Printf("change status to %s\n", i.currentStep.Title)
@@ -378,6 +394,7 @@ func (i *Instance) handleCFGACKMessage(ctx context.Context, msg CFGACK) {
 			log.Printf("change status to %s\n", i.currentStep.Title)
 		}
 	}
+	i.leaderChosen = true
 }
 
 func (i *Instance) checkWeight(msg CFG) int {
@@ -395,9 +412,13 @@ func (i *Instance) checkWeight(msg CFG) int {
 }
 
 func (i *Instance) chooseLeader(ctx context.Context) {
+	if i.currentStep.Id > Discovered {
+		return
+	}
+
 	err := i.state.Transit(i.currentStep, Election)
 	if err != nil {
-		log.Printf("cannot transit to election: %v\n", err)
+		log.Printf("cannot transit to election (chooseLeader): %v\n", err)
 		return
 	}
 	log.Printf("change status to %s\n", i.currentStep.Title)

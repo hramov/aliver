@@ -7,13 +7,13 @@ const (
 )
 
 const (
-	Off          = -1
+	Off          = 0
 	Undiscovered = 1
 	Discovered   = 2
 	Election     = 3
-	PreLeader    = 4
-	Leader       = 5
-	Follower     = 6
+	Follower     = 4
+	PreLeader    = 5
+	Leader       = 6
 )
 
 const (
