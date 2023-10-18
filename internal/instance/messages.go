@@ -29,3 +29,11 @@ type CFGACK struct {
 	InstanceID       int `json:"instance_id"`
 	ChosenInstanceID int `json:"chosen_instance_id"`
 }
+
+type ELCACK struct {
+	InstanceID int `json:"instance_id"`
+}
+
+type LDR struct {
+	InstanceID int `json:"instance_id"`
+}

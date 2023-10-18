@@ -127,7 +127,16 @@ func (i *Instance) Start(ctx context.Context) {
 	go i.checkService()
 	go i.server.Health(ctx, i.errCh)
 
-	taCh := time.After(3 * i.timeout)
+	taCh := time.NewTicker(1 * i.timeout)
+
+	go func() {
+		defer taCh.Stop()
+		for _ = range taCh.C {
+			if !i.leaderChosen && i.currentStep.Id != Election {
+				i.chooseLeader(ctx)
+			}
+		}
+	}()
 
 	for {
 		select {
@@ -136,10 +145,6 @@ func (i *Instance) Start(ctx context.Context) {
 			return
 		case e := <-i.errCh:
 			log.Println(e)
-		case <-taCh:
-			if !i.leaderChosen {
-				i.chooseLeader(ctx)
-			}
 		}
 	}
 }
@@ -194,6 +199,16 @@ func (i *Instance) handle(ctx context.Context, msg Message) {
 		}
 		i.handleELCMessage(ctx, message)
 		break
+	case ELCACKMessage:
+		messageMap := msg.Content.(map[string]any)
+		message := ELCACK{
+			InstanceID: int(messageMap["instance_id"].(float64)),
+		}
+		if message.InstanceID == i.instanceID {
+			return
+		}
+		i.handleELCACKMessage(ctx, message)
+		break
 	case CFGMessage:
 		messageMap := msg.Content.(map[string]any)
 		message := CFG{
@@ -213,6 +228,13 @@ func (i *Instance) handle(ctx context.Context, msg Message) {
 			ChosenInstanceID: int(messageMap["chosen_instance_id"].(float64)),
 		}
 		i.handleCFGACKMessage(ctx, message)
+		break
+	case LDRMessage:
+		messageMap := msg.Content.(map[string]any)
+		message := LDR{
+			InstanceID: int(messageMap["instance_id"].(float64)),
+		}
+		i.handleLDRMessage(ctx, message)
 		break
 	default:
 		log.Printf("unknown message: %v\n", msg.Name)
@@ -236,11 +258,17 @@ func (i *Instance) handleIAMMessage(ctx context.Context, msg IAM) {
 		Table[msg.InstanceID].lastActive = time.Now()
 	}
 
+	mode := UNKNOWN
+
+	if i.currentStep.Id > Election {
+		mode = i.mode
+	}
+
 	reply := ACK{
 		InstanceID:       i.instanceID,
 		RemoteInstanceID: msg.InstanceID,
 		Ip:               i.ip,
-		Mode:             i.mode,
+		Mode:             mode,
 		Weight:           i.weight,
 	}
 
@@ -261,10 +289,6 @@ func (i *Instance) handleACKMessage(ctx context.Context, msg ACK) {
 		log.Printf("change status to %s\n", i.currentStep.Title)
 	}
 
-	if msg.Mode == LEADER {
-		i.leaderChosen = true
-	}
-
 	if _, ok := Table[msg.InstanceID]; !ok {
 		Table[msg.InstanceID] = &TableInstance{
 			clusterID:  i.clusterID,
@@ -281,14 +305,15 @@ func (i *Instance) handleACKMessage(ctx context.Context, msg ACK) {
 
 	if i.mode == LEADER && msg.Mode == i.mode && msg.Weight < i.weight {
 		i.chooseLeader(ctx)
+		return
+	}
+
+	if msg.Mode == LEADER {
+		i.leaderChosen = true
 	}
 }
 
 func (i *Instance) handleELCMessage(ctx context.Context, msg ELC) {
-	if i.currentStep.Id >= Election {
-		return
-	}
-
 	i.currentQuorum = 0
 
 	err := i.state.Transit(i.currentStep, Election)
@@ -298,64 +323,74 @@ func (i *Instance) handleELCMessage(ctx context.Context, msg ELC) {
 	}
 	log.Printf("change status to %s\n", i.currentStep.Title)
 
-	cfgMessage := &CFG{
+	elcAckMessage := &ELCACK{
 		InstanceID: i.instanceID,
-		Mode:       i.mode,
-		Weight:     i.weight,
 	}
 
-	err = i.server.SendBroadcast(CFGMessage, cfgMessage)
+	err = i.server.SendBroadcast(ELCACKMessage, elcAckMessage)
 	if err != nil {
 		log.Printf("cannot send message: %v\n", err)
 		return
 	}
 }
 
-func (i *Instance) handleCFGMessage(ctx context.Context, msg CFG) {
-	if i.currentStep.Id < Election {
-		return
+func (i *Instance) handleELCACKMessage(ctx context.Context, msg ELCACK) {
+	i.currentQuorum++
+
+	if i.quorum == i.currentQuorum+1 {
+		cfgMessage := &CFG{
+			InstanceID: i.instanceID,
+			Mode:       i.mode,
+			Weight:     i.weight,
+		}
+
+		err := i.server.SendBroadcast(CFGMessage, cfgMessage)
+		if err != nil {
+			log.Printf("cannot send message: %v\n", err)
+			return
+		}
 	}
+}
+
+func (i *Instance) handleCFGMessage(ctx context.Context, msg CFG) {
+	i.currentQuorum = 0
 
 	cfgAckMessage := &CFGACK{
 		InstanceID: i.instanceID,
 	}
 
-	if msg.Mode == LEADER && i.mode != msg.Mode && i.currentStep.Id < Follower {
+	if msg.Mode == LEADER && i.mode != msg.Mode {
 		cfgAckMessage.ChosenInstanceID = msg.InstanceID
 		err := i.state.Transit(i.currentStep, Follower)
 		if err != nil {
 			log.Printf("cannot transit to follower: %v\n", err)
 			return
 		}
-		i.leaderChosen = true
 		log.Printf("change status to %s\n", i.currentStep.Title)
 	} else if msg.Mode == FOLLOWER && i.mode != msg.Mode {
 		cfgAckMessage.ChosenInstanceID = i.instanceID
-		if i.currentStep.Id < PreLeader {
-			err := i.state.Transit(i.currentStep, PreLeader)
-			if err != nil {
-				log.Printf("cannot transit to PreLeader: %v\n", err)
-				return
-			}
-			log.Printf("change status to %s\n", i.currentStep.Title)
+		err := i.state.Transit(i.currentStep, PreLeader)
+		if err != nil {
+			log.Printf("cannot transit to PreLeader: %v\n", err)
+			return
 		}
+		log.Printf("change status to %s\n", i.currentStep.Title)
 	} else if msg.Mode == i.mode {
 		cfgAckMessage.ChosenInstanceID = i.checkWeight(msg)
-		if cfgAckMessage.ChosenInstanceID == i.instanceID && i.currentStep.Id < PreLeader {
+		if cfgAckMessage.ChosenInstanceID == i.instanceID {
 			err := i.state.Transit(i.currentStep, PreLeader)
 			if err != nil {
 				log.Printf("cannot transit to preleader: %v\n", err)
 				return
 			}
 			log.Printf("change status to %s\n", i.currentStep.Title)
-		} else if i.currentStep.Id < Follower {
+		} else {
 			err := i.state.Transit(i.currentStep, Follower)
 			if err != nil {
 				log.Printf("cannot transit to follower: %v\n", err)
 				return
 			}
 			log.Printf("change status to %s\n", i.currentStep.Title)
-			i.leaderChosen = true
 		}
 	}
 
@@ -385,6 +420,14 @@ func (i *Instance) handleCFGACKMessage(ctx context.Context, msg CFGACK) {
 				return
 			}
 			log.Printf("change status to %s\n", i.currentStep.Title)
+
+			err = i.server.SendBroadcast(LDRMessage, LDR{
+				InstanceID: i.instanceID,
+			})
+			if err != nil {
+				log.Printf("cannot send message: %v\n", err)
+				return
+			}
 		} else {
 			err := i.state.Transit(i.currentStep, Follower)
 			if err != nil {
@@ -394,6 +437,9 @@ func (i *Instance) handleCFGACKMessage(ctx context.Context, msg CFGACK) {
 			log.Printf("change status to %s\n", i.currentStep.Title)
 		}
 	}
+}
+
+func (i *Instance) handleLDRMessage(ctx context.Context, message LDR) {
 	i.leaderChosen = true
 }
 
@@ -412,22 +458,10 @@ func (i *Instance) checkWeight(msg CFG) int {
 }
 
 func (i *Instance) chooseLeader(ctx context.Context) {
-	if i.currentStep.Id > Discovered {
-		return
-	}
-
-	err := i.state.Transit(i.currentStep, Election)
-	if err != nil {
-		log.Printf("cannot transit to election (chooseLeader): %v\n", err)
-		return
-	}
-	log.Printf("change status to %s\n", i.currentStep.Title)
-
 	elcMessage := ELC{
 		InstanceID: i.instanceID,
 	}
-
-	err = i.server.SendBroadcast(ELCMessage, elcMessage)
+	err := i.server.SendBroadcast(ELCMessage, elcMessage)
 	if err != nil {
 		log.Printf("cannot send ELC message: %v\n", err)
 		return

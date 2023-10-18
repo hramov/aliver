@@ -18,8 +18,10 @@ const (
 
 const (
 	IAMMessage    = "IAM"
-	CFGMessage    = "CFG"
 	ACKMessage    = "ACK"
 	ELCMessage    = "ELC"
+	ELCACKMessage = "ELCACK"
+	CFGMessage    = "CFG"
 	CFGACKMessage = "CFGACK"
+	LDRMessage    = "LDR"
 )
