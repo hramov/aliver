@@ -2,6 +2,7 @@ package instance
 
 import (
 	"context"
+	"github.com/hramov/aliver/internal/executor"
 	"log"
 	"math/rand"
 	"net"
@@ -124,7 +125,7 @@ func New(
 func (i *Instance) Start(ctx context.Context) {
 	go i.server.ServeUDP(ctx, i.resCh, i.errCh)
 	go i.handleMessages(ctx)
-	go i.checkService()
+	go i.checkService(ctx)
 	go i.server.Health(ctx, i.errCh)
 
 	taCh := time.NewTicker(2 * i.timeout)
@@ -492,9 +493,49 @@ func (i *Instance) checkInstances(ctx context.Context) {
 	}
 }
 
-func (i *Instance) checkService() {
+func (i *Instance) checkService(ctx context.Context) {
+	var err error
+	var cancel context.CancelFunc
+	var timeoutCtx context.Context
+
 	for {
+		select {
+		case <-ctx.Done():
+			cancel()
+			return
+		default:
+			timeoutCtx, cancel = context.WithTimeout(ctx, i.checkTimeout)
+			err = executor.Execute(timeoutCtx, i.checkScript)
+			if err != nil {
+				i.checkCh <- false
+			} else {
+				i.checkCh <- true
+			}
+		}
 		time.Sleep(i.checkInterval)
+	}
+}
+
+func (i *Instance) startService(ctx context.Context) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, i.runTimeout)
+	defer cancel()
+
+	err := executor.Execute(timeoutCtx, i.runScript)
+	if err != nil {
+		i.checkCh <- false
+	} else {
+		i.checkCh <- true
+	}
+}
+
+func (i *Instance) stopService(ctx context.Context) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, i.stopTimeout)
+	defer cancel()
+
+	err := executor.Execute(timeoutCtx, i.stopScript)
+	if err != nil {
+		i.checkCh <- false
+	} else {
 		i.checkCh <- true
 	}
 }
