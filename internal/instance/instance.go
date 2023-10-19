@@ -127,7 +127,7 @@ func (i *Instance) Start(ctx context.Context) {
 	go i.checkService()
 	go i.server.Health(ctx, i.errCh)
 
-	taCh := time.NewTicker(1 * i.timeout)
+	taCh := time.NewTicker(2 * i.timeout)
 
 	go func() {
 		defer taCh.Stop()
@@ -314,6 +314,10 @@ func (i *Instance) handleACKMessage(ctx context.Context, msg ACK) {
 }
 
 func (i *Instance) handleELCMessage(ctx context.Context, msg ELC) {
+	if i.currentStep.Id == Election || (!i.leaderChosen && i.currentStep.Id > Election) {
+		return
+	}
+
 	i.currentQuorum = 0
 
 	err := i.state.Transit(i.currentStep, Election)
@@ -402,7 +406,7 @@ func (i *Instance) handleCFGMessage(ctx context.Context, msg CFG) {
 }
 
 func (i *Instance) handleCFGACKMessage(ctx context.Context, msg CFGACK) {
-	if i.currentStep.Id == Follower {
+	if i.currentStep.Id < PreLeader {
 		return
 	}
 

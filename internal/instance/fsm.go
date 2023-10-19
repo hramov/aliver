@@ -42,17 +42,17 @@ func NewFsm() (*Fsm, *Step) {
 				{
 					Id:                 Follower,
 					Title:              "FOLLOWER",
-					AllowedTransitions: []int{Off, Election},
+					AllowedTransitions: []int{Off, Election, Follower, PreLeader},
 				},
 				{
 					Id:                 PreLeader,
 					Title:              "PRELEADER",
-					AllowedTransitions: []int{Leader, Follower},
+					AllowedTransitions: []int{Follower, PreLeader, Leader},
 				},
 				{
 					Id:                 Leader,
 					Title:              "LEADER",
-					AllowedTransitions: []int{Off, Election},
+					AllowedTransitions: []int{Off, Election, Leader},
 				},
 			},
 			Transitions: map[int]Step{},

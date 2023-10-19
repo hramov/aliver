@@ -5,18 +5,17 @@ import "testing"
 func TestFsm_Transit(t *testing.T) {
 	state, step := NewFsm()
 
-	newStepId := 3
-	id, err := state.Transit(step, newStepId)
+	err := state.Transit(step, Discovered)
 
 	if err != nil {
 		t.Error(err.Error())
 		return
 	}
 
-	if id != newStepId {
-		t.Errorf("wrong id: %d -> %d", id, newStepId)
+	if step.Id != Discovered {
+		t.Errorf("wrong id: %d -> %d", step.Id, Discovered)
 		return
 	}
 
-	t.Log(id)
+	t.Log(step.Id)
 }
