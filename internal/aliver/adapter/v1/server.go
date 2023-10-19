@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/hramov/aliver/internal/instance"
+	"github.com/hramov/aliver/internal/aliver/instance"
 	"log"
 	"net"
 	"strings"
@@ -13,6 +13,7 @@ import (
 
 const (
 	UDP = "udp4"
+	TCP = "tcp4"
 )
 
 type Server struct {
@@ -102,6 +103,65 @@ func (s *Server) ServeUDP(ctx context.Context, resCh chan<- instance.Message, er
 	}
 }
 
+func (s *Server) ServeTCP(ctx context.Context, resCh chan<- instance.Message, errCh chan<- error) {
+	var ln net.Listener
+	var conn net.Conn
+	var err error
+
+	ln, err = net.Listen(TCP, fmt.Sprintf(":%d", s.portTcp))
+	if err != nil {
+		errCh <- fmt.Errorf("cannot listen tcp, returning: %v\n", err)
+		return
+	}
+
+	log.Printf("TCP server started on %d\n", s.portTcp)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			conn, err = ln.Accept()
+			if err != nil {
+				errCh <- err
+				return
+			}
+
+			var buf []byte
+
+			_, err = conn.Read(buf)
+			if err != nil {
+				errCh <- fmt.Errorf("cannot read from listener: %v\n", err)
+				continue
+			}
+
+			var messageName string
+			var rawMessage any
+
+			messageName, rawMessage, err = s.parse(buf)
+			if err != nil {
+				errCh <- fmt.Errorf("cannot parse message body: %v", err)
+				continue
+			}
+
+			if messageName == instance.IAMMessage {
+				resCh <- instance.Message{
+					Name:    messageName,
+					Content: rawMessage,
+					Conn:    conn,
+				}
+			} else {
+				resCh <- instance.Message{
+					Name:    messageName,
+					Content: rawMessage,
+				}
+			}
+		}
+
+	}
+
+}
+
 func (s *Server) Health(ctx context.Context, errCh chan<- error) {
 	for {
 		if s.pc == nil {
@@ -142,6 +202,26 @@ func (s *Server) SendBroadcast(name string, content any) error {
 	if err != nil {
 		log.Printf("cannot write to pc: %v\n", err)
 		return fmt.Errorf("cannot write to pc: %v\n", err)
+	}
+
+	return nil
+}
+
+func (s *Server) Send(ctx context.Context, conn net.Conn, name string, content any) error {
+	message := rawMessageType{
+		Name:    name,
+		Content: content,
+	}
+	rawMsgBytes, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("cannot marshal raw message: %v\n", err)
+		return fmt.Errorf("cannot marshal raw message: %v\n", err)
+	}
+
+	_, err = conn.Write(rawMsgBytes)
+	if err != nil {
+		log.Printf("cannot write to conn: %v\n", err)
+		return fmt.Errorf("cannot write to conn: %v\n", err)
 	}
 
 	return nil

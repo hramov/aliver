@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	v1 "github.com/hramov/aliver/internal/aliver/adapter/v1"
-	"github.com/hramov/aliver/internal/aliver/config"
-	"github.com/hramov/aliver/internal/aliver/instance"
+	"github.com/hramov/aliver/internal/tcp_aliver"
 	"github.com/joho/godotenv"
 	"log"
 	"os"
@@ -24,8 +22,8 @@ func main() {
 		log.Fatal("config path env is not set")
 	}
 
-	cfg := config.Config{}
-	err := config.LoadConfig(configPath, &cfg)
+	cfg := tcp_aliver.Config{}
+	err := tcp_aliver.LoadConfig(configPath, &cfg)
 	if err != nil {
 		log.Fatalf("cannot parse config file: %v\n", err)
 	}
@@ -34,17 +32,14 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(appCtx, os.Interrupt, os.Kill)
 
-	finiteStateMachine, currentStep := instance.NewFsm()
-
-	server, err := v1.NewServer(cfg.InstanceID, cfg.Ip, cfg.Mask, cfg.Broadcast, cfg.PortTCP, cfg.PortUDP, cfg.Timeout)
+	server, err := tcp_aliver.NewServer(cfg.InstanceID, cfg.PortTCP, cfg.Timeout)
 	if err != nil {
 		log.Fatalf("cannot instantiate server: %v\n", err)
 	}
 
-	aliverInstance, err := instance.New(
+	aliverInstance, err := tcp_aliver.New(
 		cfg.ClusterID,
 		cfg.InstanceID,
-		cfg.Ip,
 		cfg.PortTCP,
 		cfg.Mode,
 		cfg.Weight,
@@ -57,8 +52,6 @@ func main() {
 		cfg.RunTimeout,
 		cfg.StopScript,
 		cfg.StopTimeout,
-		finiteStateMachine,
-		currentStep,
 		server)
 	if err != nil {
 		log.Fatalf("cannot get instance: %v\n", err)

@@ -2,7 +2,7 @@ package instance
 
 import (
 	"context"
-	"github.com/hramov/aliver/internal/executor"
+	"github.com/hramov/aliver/internal/aliver/executor"
 	"log"
 	"math/rand"
 	"net"
@@ -19,6 +19,7 @@ type Message struct {
 	Name    string
 	Content any
 	Ip      net.IP
+	Conn    net.Conn
 }
 
 type TableInstance struct {

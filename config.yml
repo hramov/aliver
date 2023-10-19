@@ -7,6 +7,10 @@ mode: 'leader'
 weight: 10
 timeout: '5s'
 
+servers:
+  - ip: '127.0.0.1'
+    port: 6223
+
 check_script: 'scripts/check.sh'
 check_interval: '5s'
 check_retries: 5
